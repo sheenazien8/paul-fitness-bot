@@ -79,12 +79,16 @@ func (app *BotApp) HandleUpdate(update tgbotapi.Update) {
 
 // ensureUser creates user in DB if not exists
 func (app *BotApp) ensureUser(tgUser *tgbotapi.User) {
+	if _, err := GetUser(int64(tgUser.ID)); err == nil {
+		return
+	}
+
 	user := &User{
 		UserID:           int64(tgUser.ID),
 		Username:         tgUser.UserName,
 		FirstName:        tgUser.FirstName,
-		Weight:           72,
-		Height:           167,
+		Weight:           70,
+		Height:           170,
 		TargetWeight:     65,
 		WorkoutDays:      "1,2,4,5",
 		NotificationHour: 7,

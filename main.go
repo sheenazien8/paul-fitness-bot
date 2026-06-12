@@ -34,21 +34,6 @@ func main() {
 		os.Exit(1)
 	}
 	defer CloseDB()
-
-	defaultUser := &User{
-		UserID:           491937914,
-		Username:         "sheenazien",
-		FirstName:        "Sheena",
-		Weight:           72,
-		Height:           167,
-		TargetWeight:     65,
-		WorkoutDays:      "1,2,4,5",
-		NotificationHour: 7,
-	}
-	if err := CreateUser(defaultUser); err != nil {
-		slog.Warn("default user may already exist", "error", err)
-	}
-
 	app, err := NewBotApp(token)
 	if err != nil {
 		slog.Error("failed to create bot", "error", err)
