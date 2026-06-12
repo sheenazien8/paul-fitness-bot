@@ -11,24 +11,20 @@ import (
 )
 
 func main() {
-	// Setup structured logging
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 
 	slog.Info("starting workout bot")
 
-	// Load .env
 	if err := godotenv.Load(); err != nil {
 		slog.Warn("no .env file found, using environment variables")
 	}
 
-	// Get bot token
 	token := os.Getenv("WORKOUT_BOT_TOKEN")
 	if token == "" {
 		slog.Error("WORKOUT_BOT_TOKEN environment variable is required")
 		os.Exit(1)
 	}
 
-	// Initialize database
 	dbPath := os.Getenv("DB_PATH")
 	if dbPath == "" {
 		dbPath = "data/bot.db"
@@ -39,7 +35,6 @@ func main() {
 	}
 	defer CloseDB()
 
-	// Create default user (Sheena)
 	defaultUser := &User{
 		UserID:           491937914,
 		Username:         "sheenazien",
@@ -54,14 +49,12 @@ func main() {
 		slog.Warn("default user may already exist", "error", err)
 	}
 
-	// Create bot
 	app, err := NewBotApp(token)
 	if err != nil {
 		slog.Error("failed to create bot", "error", err)
 		os.Exit(1)
 	}
 
-	// Initialize scheduler
 	if err := InitScheduler(SchedulerCallbacks{
 		SendWorkout: func(userID int64, dayOfWeek int) {
 			app.SendWorkoutNotification(userID)
@@ -75,14 +68,12 @@ func main() {
 	}
 	defer StopScheduler()
 
-	// Setup updates channel
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 30
 	updates := app.Bot.GetUpdatesChan(u)
 
 	slog.Info("bot is running, waiting for messages...")
 
-	// Handle graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
@@ -94,7 +85,6 @@ func main() {
 		os.Exit(0)
 	}()
 
-	// Process updates
 	for update := range updates {
 		app.HandleUpdate(update)
 	}

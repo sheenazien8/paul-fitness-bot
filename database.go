@@ -14,7 +14,6 @@ import (
 
 var db *sql.DB
 
-// InitDB opens or creates the SQLite database and runs migrations
 func InitDB(dbPath string) error {
 	dir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -27,7 +26,6 @@ func InitDB(dbPath string) error {
 		return fmt.Errorf("open database: %w", err)
 	}
 
-	// Enable WAL mode for better concurrency
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		slog.Warn("failed to enable WAL mode", "error", err)
 	}
@@ -110,19 +108,15 @@ func migrate() error {
 	return nil
 }
 
-// CloseDB closes the database connection
 func CloseDB() {
 	if db != nil {
 		db.Close()
 	}
 }
 
-// GetDB returns the database connection
 func GetDB() *sql.DB {
 	return db
 }
-
-// --- User operations ---
 
 func CreateUser(user *User) error {
 	_, err := db.Exec(
@@ -172,8 +166,6 @@ func UpdateUserProfile(userID int64, weight, height, targetWeight float64) error
 	return err
 }
 
-// --- Workout operations ---
-
 func SaveWorkout(userID int64, dayOfWeek int, workoutType string, exercises []Exercise) (int64, error) {
 	exJSON, err := json.Marshal(exercises)
 	if err != nil {
@@ -216,8 +208,6 @@ func GetTodaysWorkout(userID int64, dayOfWeek int) (*Workout, error) {
 	}
 	return w, nil
 }
-
-// --- Workout log operations ---
 
 func SaveWorkoutLog(log *WorkoutLog) error {
 	_, err := db.Exec(
@@ -269,8 +259,6 @@ func GetRecentWorkoutLogs(userID int64, limit int) ([]WorkoutLog, error) {
 	return logs, nil
 }
 
-// --- Weight log operations ---
-
 func SaveWeightLog(userID int64, weight, bmi float64) error {
 	_, err := db.Exec(
 		`INSERT INTO weight_logs (user_id, weight, bmi) VALUES (?, ?, ?)`, userID, weight, bmi,
@@ -278,7 +266,6 @@ func SaveWeightLog(userID int64, weight, bmi float64) error {
 	if err != nil {
 		return err
 	}
-	// Update user's current weight
 	return UpdateUserWeight(userID, weight)
 }
 
@@ -304,15 +291,12 @@ func GetPreviousWeightLog(userID int64) (*WeightLog, error) {
 	return w, nil
 }
 
-// --- Session operations ---
-
 func GetSession(userID int64) (*UserSession, error) {
 	s := &UserSession{}
 	err := db.QueryRow(
 		`SELECT user_id, state, workout_id, updated_at FROM user_sessions WHERE user_id = ?`, userID,
 	).Scan(&s.UserID, &s.State, &s.WorkoutID, &s.UpdatedAt)
 	if err != nil {
-		// Session doesn't exist, create idle one
 		_, err2 := db.Exec(`INSERT OR IGNORE INTO user_sessions (user_id, state) VALUES (?, 'idle')`, userID)
 		if err2 != nil {
 			return nil, err2
@@ -334,8 +318,6 @@ func UpdateSession(userID int64, state string, workoutID int64) error {
 	)
 	return err
 }
-
-// --- Stats ---
 
 func GetUserStats(userID int64) (*Stats, error) {
 	user, err := GetUser(userID)
@@ -382,8 +364,6 @@ func GetUserStats(userID int64) (*Stats, error) {
 	}, nil
 }
 
-// --- User Preferences operations ---
-
 func GetUserPreferences(userID int64) (*UserPreferences, error) {
 	p := &UserPreferences{}
 	err := db.QueryRow(
@@ -391,7 +371,6 @@ func GetUserPreferences(userID int64) (*UserPreferences, error) {
 		 FROM user_preferences WHERE user_id = ?`, userID,
 	).Scan(&p.UserID, &p.Goal, &p.ExperienceLevel, &p.HasDumbbell, &p.HasResistanceBand, &p.HasPullupBar, &p.OnboardingDone)
 	if err != nil {
-		// No preferences yet, return defaults
 		p.UserID = userID
 		p.Goal = "diet"
 		p.ExperienceLevel = "beginner"
@@ -456,7 +435,6 @@ func boolToInt(b bool) int {
 	return 0
 }
 
-// CalculateBMI computes BMI from weight (kg) and height (cm)
 func CalculateBMI(weight, heightCm float64) float64 {
 	heightM := heightCm / 100
 	return weight / (heightM * heightM)

@@ -18,7 +18,6 @@ const (
 	llmTimeout         = 30 * time.Second
 )
 
-// ollamaRequest is the request body for Ollama API
 type ollamaRequest struct {
 	Model  string `json:"model"`
 	Prompt string `json:"prompt"`
@@ -26,13 +25,11 @@ type ollamaRequest struct {
 	Format string `json:"format"`
 }
 
-// ollamaResponse is the response body from Ollama API
 type ollamaResponse struct {
 	Response string `json:"response"`
 	Error    string `json:"error,omitempty"`
 }
 
-// getOllamaURL returns the Ollama API URL from env or default
 func getOllamaURL() string {
 	if url := os.Getenv("OLLAMA_URL"); url != "" {
 		return strings.TrimRight(url, "/")
@@ -40,7 +37,6 @@ func getOllamaURL() string {
 	return defaultOllamaURL
 }
 
-// getOllamaModel returns the model name from env or default
 func getOllamaModel() string {
 	if model := os.Getenv("OLLAMA_MODEL"); model != "" {
 		return model
@@ -48,7 +44,6 @@ func getOllamaModel() string {
 	return defaultOllamaModel
 }
 
-// GenerateWorkoutWithLLM calls Ollama to generate a workout based on user context
 func GenerateWorkoutWithLLM(user *User, prefs *UserPreferences, dayType string, recentLogs []WorkoutLog) (*LLMWorkoutResponse, error) {
 	prompt := buildWorkoutPrompt(user, prefs, dayType, recentLogs)
 
@@ -57,14 +52,12 @@ func GenerateWorkoutWithLLM(user *User, prefs *UserPreferences, dayType string, 
 		return nil, fmt.Errorf("ollama call failed: %w", err)
 	}
 
-	// Parse the JSON response
 	var llmResp LLMWorkoutResponse
 	if err := json.Unmarshal([]byte(result), &llmResp); err != nil {
 		slog.Error("failed to parse LLM JSON response", "error", err, "raw", truncateString(result, 500))
 		return nil, fmt.Errorf("parse LLM response: %w", err)
 	}
 
-	// Validate structure
 	if !validateLLMResponse(&llmResp) {
 		slog.Error("LLM response validation failed",
 			"warmup_count", len(llmResp.Warmup),
@@ -77,7 +70,6 @@ func GenerateWorkoutWithLLM(user *User, prefs *UserPreferences, dayType string, 
 	return &llmResp, nil
 }
 
-// buildWorkoutPrompt constructs the prompt for Ollama
 func buildWorkoutPrompt(user *User, prefs *UserPreferences, dayType string, recentLogs []WorkoutLog) string {
 	goalDesc := map[string]string{
 		"diet":        "Diet/Turun Berat (fokus fat loss, calorie burn)",
@@ -101,7 +93,6 @@ func buildWorkoutPrompt(user *User, prefs *UserPreferences, dayType string, rece
 
 	bmi := CalculateBMI(user.Weight, user.Height)
 
-	// Build equipment list
 	var equipmentItems []string
 	if prefs.HasDumbbell {
 		equipmentItems = append(equipmentItems, "Dumbbell")
@@ -117,7 +108,6 @@ func buildWorkoutPrompt(user *User, prefs *UserPreferences, dayType string, rece
 	}
 	equipmentList := strings.Join(equipmentItems, ", ")
 
-	// Build history context
 	historyContext := ""
 	if len(recentLogs) > 0 {
 		var parts []string
@@ -130,7 +120,6 @@ func buildWorkoutPrompt(user *User, prefs *UserPreferences, dayType string, rece
 		}
 		historyContext = fmt.Sprintf("\n\nRiwayat latihan terakhir:\n%s\n", strings.Join(parts, "\n"))
 
-		// Add progression hint
 		avgScore := 0.0
 		for _, l := range recentLogs {
 			if len(recentLogs) <= 3 {
@@ -203,7 +192,6 @@ Penting:
 	return prompt
 }
 
-// callOllama sends a prompt to the Ollama API and returns the response text
 func callOllama(prompt string) (string, error) {
 	url := getOllamaURL() + "/api/generate"
 	model := getOllamaModel()
@@ -246,7 +234,6 @@ func callOllama(prompt string) (string, error) {
 	return ollamaResp.Response, nil
 }
 
-// validateLLMResponse checks that the LLM response has valid structure
 func validateLLMResponse(resp *LLMWorkoutResponse) bool {
 	if len(resp.Warmup) < 3 || len(resp.Warmup) > 6 {
 		return false
@@ -258,7 +245,6 @@ func validateLLMResponse(resp *LLMWorkoutResponse) bool {
 		return false
 	}
 
-	// Verify each exercise has required fields
 	for _, ex := range resp.Warmup {
 		if ex.Name == "" || ex.Reps == "" {
 			return false
@@ -278,7 +264,6 @@ func validateLLMResponse(resp *LLMWorkoutResponse) bool {
 	return true
 }
 
-// truncateString truncates a string for logging
 func truncateString(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
