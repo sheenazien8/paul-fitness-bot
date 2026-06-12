@@ -1,0 +1,16 @@
+[Unit]
+Description=Workout Bot - Home Workout Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=sheenazien8
+WorkingDirectory=/DATA/Documents/Code/my-project/workout-bot
+ExecStart=/DATA/Documents/Code/my-project/workout-bot/workout-bot
+Restart=always
+RestartSec=5
+# Token loaded from .env via EnvironmentFile
+EnvironmentFile=/DATA/Documents/Code/my-project/workout-bot/.env
+
+[Install]
+WantedBy=multi-user.target
