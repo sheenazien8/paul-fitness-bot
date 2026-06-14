@@ -98,6 +98,15 @@ func migrate() error {
 			workout_id INTEGER DEFAULT 0,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
+		`CREATE TABLE IF NOT EXISTS chat_history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER,
+			role TEXT NOT NULL,
+			content TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(user_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_chat_history_user ON chat_history(user_id, id)`,
 	}
 
 	for _, m := range migrations {
@@ -438,4 +447,47 @@ func boolToInt(b bool) int {
 func CalculateBMI(weight, heightCm float64) float64 {
 	heightM := heightCm / 100
 	return weight / (heightM * heightM)
+}
+
+func SaveChatMessage(userID int64, role, content string) error {
+	_, err := db.Exec(
+		`INSERT INTO chat_history (user_id, role, content) VALUES (?, ?, ?)`,
+		userID, role, content,
+	)
+	return err
+}
+
+func GetChatHistory(userID int64, limit int) ([]ChatMessage, error) {
+	rows, err := db.Query(
+		`SELECT id, user_id, role, content, created_at
+		 FROM chat_history WHERE user_id = ? ORDER BY id DESC LIMIT ?`, userID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var messages []ChatMessage
+	for rows.Next() {
+		var m ChatMessage
+		if err := rows.Scan(&m.ID, &m.UserID, &m.Role, &m.Content, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		messages = append(messages, m)
+	}
+
+	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+		messages[i], messages[j] = messages[j], messages[i]
+	}
+
+	return messages, nil
+}
+
+func ClearOldChatHistory(userID int64, keepLast int) error {
+	_, err := db.Exec(
+		`DELETE FROM chat_history WHERE user_id = ? AND id NOT IN (
+			SELECT id FROM chat_history WHERE user_id = ? ORDER BY id DESC LIMIT ?
+		)`, userID, userID, keepLast,
+	)
+	return err
 }

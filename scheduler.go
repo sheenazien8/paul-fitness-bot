@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 	"log/slog"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -13,7 +11,7 @@ import (
 var scheduler *cron.Cron
 
 type SchedulerCallbacks struct {
-	SendWorkout      func(userID int64, dayOfWeek int)
+	SendWorkout      func(userID int64)
 	SendWeightReminder func(userID int64)
 }
 
@@ -52,11 +50,10 @@ func scheduleUserJobs() error {
 		cronDow := day % 7
 		expr := fmt.Sprintf("0 %d * * %d", user.NotificationHour, cronDow)
 
-		d := day
 		slog.Info("scheduling workout", "user_id", userID, "cron", expr, "day", day)
 		if _, err := scheduler.AddFunc(expr, func() {
-			slog.Info("sending workout notification", "user_id", userID, "day", d)
-			callbacks.SendWorkout(userID, d)
+			slog.Info("sending workout notification", "user_id", userID)
+			callbacks.SendWorkout(userID)
 		}); err != nil {
 			slog.Error("failed to schedule workout", "error", err, "cron", expr)
 		}
@@ -79,17 +76,6 @@ func StopScheduler() {
 		scheduler.Stop()
 		slog.Info("scheduler stopped")
 	}
-}
-
-func parseWorkoutDays(days string) []int {
-	var result []int
-	for _, s := range strings.Split(days, ",") {
-		s = strings.TrimSpace(s)
-		if n, err := strconv.Atoi(s); err == nil {
-			result = append(result, n)
-		}
-	}
-	return result
 }
 
 func UpdateUserSchedule(userID int64) error {

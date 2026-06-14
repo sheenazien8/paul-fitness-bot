@@ -81,3 +81,26 @@ type Stats struct {
 	WeeklyCalories   int
 	Streak           int
 }
+
+// ChatMessage stores a single message in conversation history.
+type ChatMessage struct {
+	ID        int64
+	UserID    int64
+	Role      string `json:"role"` // "system", "user", "assistant", "tool"
+	Content   string
+	CreatedAt time.Time
+}
+
+// ToolCall represents a function call requested by the LLM.
+type ToolCall struct {
+	Name      string                 `json:"name"`
+	Arguments map[string]interface{} `json:"arguments"`
+}
+
+// ToolResult is the result of executing a tool call
+type ToolResult struct {
+	ToolName string `json:"tool_name"`
+	Success  bool   `json:"success"`
+	Data     string `json:"data"`
+	Error    string `json:"error,omitempty"`
+}
