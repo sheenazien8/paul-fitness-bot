@@ -98,6 +98,34 @@ func migrate() error {
 			workout_id INTEGER DEFAULT 0,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
+		`CREATE TABLE IF NOT EXISTS chat_history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER,
+			role TEXT NOT NULL,
+			content TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(user_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_chat_history_user ON chat_history(user_id, id)`,
+		`CREATE TABLE IF NOT EXISTS mood_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER,
+			mood TEXT NOT NULL,
+			energy INTEGER NOT NULL,
+			logged_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(user_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS chat_summaries (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			summary TEXT NOT NULL,
+			from_message_id INTEGER NOT NULL,
+			to_message_id INTEGER NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(user_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_chat_summaries_user ON chat_summaries(user_id)`,
 	}
 
 	for _, m := range migrations {
@@ -105,6 +133,11 @@ func migrate() error {
 			return fmt.Errorf("migration failed: %w", err)
 		}
 	}
+
+	if _, err := db.Exec(`ALTER TABLE user_preferences ADD COLUMN weekly_report INTEGER DEFAULT 1`); err != nil {
+		slog.Debug("weekly_report column may already exist", "error", err)
+	}
+
 	return nil
 }
 
@@ -367,9 +400,9 @@ func GetUserStats(userID int64) (*Stats, error) {
 func GetUserPreferences(userID int64) (*UserPreferences, error) {
 	p := &UserPreferences{}
 	err := db.QueryRow(
-		`SELECT user_id, goal, experience_level, has_dumbbell, has_resistance_band, has_pullup_bar, onboarding_done
+		`SELECT user_id, goal, experience_level, has_dumbbell, has_resistance_band, has_pullup_bar, onboarding_done, COALESCE(weekly_report, 1)
 		 FROM user_preferences WHERE user_id = ?`, userID,
-	).Scan(&p.UserID, &p.Goal, &p.ExperienceLevel, &p.HasDumbbell, &p.HasResistanceBand, &p.HasPullupBar, &p.OnboardingDone)
+	).Scan(&p.UserID, &p.Goal, &p.ExperienceLevel, &p.HasDumbbell, &p.HasResistanceBand, &p.HasPullupBar, &p.OnboardingDone, &p.WeeklyReport)
 	if err != nil {
 		p.UserID = userID
 		p.Goal = "diet"
@@ -378,6 +411,7 @@ func GetUserPreferences(userID int64) (*UserPreferences, error) {
 		p.HasResistanceBand = true
 		p.HasPullupBar = true
 		p.OnboardingDone = false
+		p.WeeklyReport = true
 		return p, nil
 	}
 	return p, nil
@@ -385,9 +419,9 @@ func GetUserPreferences(userID int64) (*UserPreferences, error) {
 
 func CreateUserPreferences(p *UserPreferences) error {
 	_, err := db.Exec(
-		`INSERT OR REPLACE INTO user_preferences (user_id, goal, experience_level, has_dumbbell, has_resistance_band, has_pullup_bar, onboarding_done)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		p.UserID, p.Goal, p.ExperienceLevel, boolToInt(p.HasDumbbell), boolToInt(p.HasResistanceBand), boolToInt(p.HasPullupBar), boolToInt(p.OnboardingDone),
+		`INSERT OR REPLACE INTO user_preferences (user_id, goal, experience_level, has_dumbbell, has_resistance_band, has_pullup_bar, onboarding_done, weekly_report)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.UserID, p.Goal, p.ExperienceLevel, boolToInt(p.HasDumbbell), boolToInt(p.HasResistanceBand), boolToInt(p.HasPullupBar), boolToInt(p.OnboardingDone), boolToInt(p.WeeklyReport),
 	)
 	return err
 }
@@ -401,7 +435,7 @@ func UpdateUserPreferenceField(userID int64, field string, value interface{}) er
 			userID, value,
 		)
 		return err
-	case "has_dumbbell", "has_resistance_band", "has_pullup_bar":
+	case "has_dumbbell", "has_resistance_band", "has_pullup_bar", "weekly_report":
 		_, err := db.Exec(
 			`INSERT INTO user_preferences (user_id, `+field+`, onboarding_done) VALUES (?, ?, 0)
 			 ON CONFLICT(user_id) DO UPDATE SET `+field+` = excluded.`+field,
@@ -438,4 +472,184 @@ func boolToInt(b bool) int {
 func CalculateBMI(weight, heightCm float64) float64 {
 	heightM := heightCm / 100
 	return weight / (heightM * heightM)
+}
+
+func SaveChatMessage(userID int64, role, content string) error {
+	_, err := db.Exec(
+		`INSERT INTO chat_history (user_id, role, content) VALUES (?, ?, ?)`,
+		userID, role, content,
+	)
+	return err
+}
+
+func GetChatHistory(userID int64, limit int) ([]ChatMessage, error) {
+	rows, err := db.Query(
+		`SELECT id, user_id, role, content, created_at
+		 FROM chat_history WHERE user_id = ? ORDER BY id DESC LIMIT ?`, userID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var messages []ChatMessage
+	for rows.Next() {
+		var m ChatMessage
+		if err := rows.Scan(&m.ID, &m.UserID, &m.Role, &m.Content, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		messages = append(messages, m)
+	}
+
+	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+		messages[i], messages[j] = messages[j], messages[i]
+	}
+
+	return messages, nil
+}
+
+func ClearOldChatHistory(userID int64, keepLast int) error {
+	_, err := db.Exec(
+		`DELETE FROM chat_history WHERE user_id = ? AND id NOT IN (
+			SELECT id FROM chat_history WHERE user_id = ? ORDER BY id DESC LIMIT ?
+		)`, userID, userID, keepLast,
+	)
+	return err
+}
+
+func SaveMoodLog(userID int64, mood string, energy int) error {
+	_, err := db.Exec(
+		`INSERT INTO mood_logs (user_id, mood, energy, logged_at) VALUES (?, ?, ?, datetime('now'))`,
+		userID, mood, energy,
+	)
+	return err
+}
+
+func GetRecentMoodLogs(userID int64, limit int) ([]MoodLog, error) {
+	rows, err := db.Query(
+		`SELECT id, user_id, mood, energy, logged_at FROM mood_logs WHERE user_id = ? ORDER BY logged_at DESC LIMIT ?`,
+		userID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []MoodLog
+	for rows.Next() {
+		var l MoodLog
+		if err := rows.Scan(&l.ID, &l.UserID, &l.Mood, &l.Energy, &l.LoggedAt); err != nil {
+			return nil, err
+		}
+		logs = append(logs, l)
+	}
+	return logs, nil
+}
+
+func GetCachedSummary(userID int64, fromID, toID int64) string {
+	var summary string
+	err := db.QueryRow(
+		`SELECT summary FROM chat_summaries WHERE user_id = ? AND from_message_id = ? AND to_message_id = ? ORDER BY id DESC LIMIT 1`,
+		userID, fromID, toID,
+	).Scan(&summary)
+	if err != nil {
+		return ""
+	}
+	return summary
+}
+
+func SaveCachedSummary(userID int64, fromID, toID int64, summary string) error {
+	_, err := db.Exec(
+		`INSERT INTO chat_summaries (user_id, summary, from_message_id, to_message_id) VALUES (?, ?, ?, ?)`,
+		userID, summary, fromID, toID,
+	)
+	return err
+}
+
+func InvalidateSummaries(userID int64) error {
+	_, err := db.Exec(`DELETE FROM chat_summaries WHERE user_id = ?`, userID)
+	return err
+}
+
+func GetAllActiveUsers() ([]User, error) {
+	rows, err := db.Query(
+		`SELECT u.user_id, u.username, u.first_name, u.weight, u.height, u.target_weight,
+		        u.workout_days, u.notification_hour, u.streak, u.last_workout_date,
+		        u.created_at, u.updated_at
+		 FROM users u
+		 JOIN user_preferences p ON u.user_id = p.user_id
+		 WHERE p.onboarding_done = 1`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []User
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.UserID, &u.Username, &u.FirstName, &u.Weight, &u.Height, &u.TargetWeight,
+			&u.WorkoutDays, &u.NotificationHour, &u.Streak, &u.LastWorkoutDate, &u.CreatedAt, &u.UpdatedAt); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	return users, nil
+}
+
+func GetWeeklyStats(userID int64) (*WeeklyStats, error) {
+	stats := &WeeklyStats{}
+
+	err := db.QueryRow(
+		`SELECT COUNT(*), COALESCE(SUM(duration_minutes), 0), COALESCE(SUM(calories), 0),
+		        COALESCE(AVG(satisfaction), 0), COALESCE(MAX(score), 0)
+		 FROM workout_logs WHERE user_id = ? AND logged_at >= date('now', '-7 days')`,
+		userID,
+	).Scan(&stats.WorkoutCount, &stats.TotalDuration, &stats.TotalCalories, &stats.AvgSatisfaction, &stats.BestScore)
+	if err != nil {
+		return nil, err
+	}
+
+	var weightStart, weightEnd float64
+	err = db.QueryRow(
+		`SELECT weight FROM weight_logs WHERE user_id = ? AND logged_at < date('now', '-6 days') ORDER BY logged_at DESC LIMIT 1`,
+		userID,
+	).Scan(&weightStart)
+	if err != nil {
+		weightStart = 0
+	}
+
+	err = db.QueryRow(
+		`SELECT weight FROM weight_logs WHERE user_id = ? ORDER BY logged_at DESC LIMIT 1`,
+		userID,
+	).Scan(&weightEnd)
+	if err != nil {
+		weightEnd = 0
+	}
+
+	stats.WeightStart = weightStart
+	stats.WeightEnd = weightEnd
+	if weightStart > 0 && weightEnd > 0 {
+		stats.WeightChange = weightEnd - weightStart
+	}
+
+	err = db.QueryRow(
+		`SELECT streak FROM users WHERE user_id = ?`, userID,
+	).Scan(&stats.StreakDays)
+	if err != nil {
+		stats.StreakDays = 0
+	}
+
+	var bestDayName string
+	err = db.QueryRow(
+		`SELECT COALESCE(strftime('%w', logged_at), '') FROM workout_logs
+		 WHERE user_id = ? AND logged_at >= date('now', '-7 days') AND score = ? LIMIT 1`,
+		userID, stats.BestScore,
+	).Scan(&bestDayName)
+	if err == nil && bestDayName != "" {
+		dayMap := map[string]string{"0": "Minggu", "1": "Senin", "2": "Selasa", "3": "Rabu", "4": "Kamis", "5": "Jumat", "6": "Sabtu"}
+		stats.BestDay = dayMap[bestDayName]
+	}
+
+	return stats, nil
 }

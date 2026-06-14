@@ -2,3 +2,8 @@ data/
 .env
 workout-bot
 *.db
+---
+PHASE2_PLAN.md
+PHASE2_PLAN.md
+PHASE3_SUMMARY_PLAN.md
+phases/

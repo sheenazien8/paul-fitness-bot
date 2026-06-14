@@ -27,6 +27,7 @@ type UserPreferences struct {
 	HasResistanceBand bool
 	HasPullupBar      bool
 	OnboardingDone    bool
+	WeeklyReport      bool
 }
 
 type LLMWorkoutResponse struct {
@@ -80,4 +81,49 @@ type Stats struct {
 	WeeklyAvgScore   float64
 	WeeklyCalories   int
 	Streak           int
+}
+
+type MoodLog struct {
+	ID       int64
+	UserID   int64
+	Mood     string
+	Energy   int
+	LoggedAt time.Time
+}
+
+// ChatMessage stores a single message in conversation history.
+type ChatMessage struct {
+	ID        int64
+	UserID    int64
+	Role      string `json:"role"`
+	Content   string
+	CreatedAt time.Time
+}
+
+// ToolCall represents a function call requested by the LLM.
+type ToolCall struct {
+	Name      string                 `json:"name"`
+	Arguments map[string]interface{} `json:"arguments"`
+}
+
+// ToolResult is the result of executing a tool call
+type ToolResult struct {
+	ToolName string `json:"tool_name"`
+	Success  bool   `json:"success"`
+	Data     string `json:"data"`
+	Error    string `json:"error,omitempty"`
+}
+
+// WeeklyStats holds aggregated stats for the weekly report.
+type WeeklyStats struct {
+	WorkoutCount   int
+	TotalDuration   int
+	TotalCalories   int
+	AvgSatisfaction float64
+	StreakDays      int
+	WeightStart     float64
+	WeightEnd       float64
+	WeightChange    float64
+	BestDay         string
+	BestScore       float64
 }
