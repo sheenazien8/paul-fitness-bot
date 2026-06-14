@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestCalculateWorkoutScore(t *testing.T) {
 	tests := []struct {
@@ -182,10 +185,10 @@ func TestFormatWorkoutForDisplay(t *testing.T) {
 	if result == "" {
 		t.Error("FormatWorkoutForDisplay returned empty string")
 	}
-	if !contains(result, "Bench Press") {
+	if !strings.Contains(result, "Bench Press") {
 		t.Error("FormatWorkoutForDisplay missing exercise name")
 	}
-	if !contains(result, "1") {
+	if !strings.Contains(result, "1") {
 		t.Error("FormatWorkoutForDisplay missing workout ID for button")
 	}
 }
@@ -216,15 +219,164 @@ func TestParseWorkoutToolResult(t *testing.T) {
 	_ = typeName
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstr(s, substr))
-}
-
-func containsSubstr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
+func TestGetScoreDescription(t *testing.T) {
+	tests := []struct {
+		score float64
+		want string
+	}{
+		{95.0, "Luar biasa! Kamu memberikan yang terbaik!"},
+		{80.0, "Hebat! Latihan yang solid!"},
+		{65.0, "Bagus! Terus pertahankan!"},
+		{45.0, "Lumayan, semangat lagi ya!"},
+		{20.0, "Yuk semangat! Setiap langih berarti!"},
+	}
+	for _, tt := range tests {
+		got := GetScoreDescription(tt.score)
+		if got != tt.want {
+			t.Errorf("GetScoreDescription(%.1f) = %q, want %q", tt.score, got, tt.want)
 		}
 	}
-	return false
+}
+
+func TestGetBMIEmoji(t *testing.T) {
+	tests := []struct {
+		bmi  float64
+		want string
+	}{
+		{17.0, "📉"},
+		{22.0, "✅"},
+		{27.0, "⚠️"},
+		{32.0, "🔴"},
+	}
+	for _, tt := range tests {
+		got := GetBMIEmoji(tt.bmi)
+		if got != tt.want {
+			t.Errorf("GetBMIEmoji(%.1f) = %s, want %s", tt.bmi, got, tt.want)
+		}
+	}
+}
+
+func TestGetWeightChangeEmoji(t *testing.T) {
+	tests := []struct {
+		change float64
+		want   string
+	}{
+		{-1.0, "🎉"},
+		{-0.3, "📉"},
+		{0.0, "➡️"},
+		{0.3, "📊"},
+		{1.0, "📈"},
+	}
+	for _, tt := range tests {
+		got := GetWeightChangeEmoji(tt.change)
+		if got != tt.want {
+			t.Errorf("GetWeightChangeEmoji(%.1f) = %s, want %s", tt.change, got, tt.want)
+		}
+	}
+}
+
+func TestGetWarmUp(t *testing.T) {
+	tests := []struct {
+		workoutType string
+		wantLen     bool
+	}{
+		{"push", true},
+		{"pull", true},
+		{"legs", true},
+		{"full_body", true},
+		{"unknown", false},
+	}
+	for _, tt := range tests {
+		got := GetWarmUp(tt.workoutType)
+		if (len(got) > 0) != tt.wantLen {
+			t.Errorf("GetWarmUp(%q) returned %d exercises, wantLen=%v", tt.workoutType, len(got), tt.wantLen)
+		}
+	}
+}
+
+func TestGetCoolDown(t *testing.T) {
+	tests := []struct {
+		workoutType string
+		wantLen     bool
+	}{
+		{"push", true},
+		{"pull", true},
+		{"legs", true},
+		{"full_body", true},
+		{"unknown", false},
+	}
+	for _, tt := range tests {
+		got := GetCoolDown(tt.workoutType)
+		if (len(got) > 0) != tt.wantLen {
+			t.Errorf("GetCoolDown(%q) returned %d exercises, wantLen=%v", tt.workoutType, len(got), tt.wantLen)
+		}
+	}
+}
+
+func TestGetWorkoutForDay(t *testing.T) {
+	push := GetWorkoutForDay(1)
+	if push == nil {
+		t.Error("GetWorkoutForDay(1) returned nil for push day")
+	}
+	off := GetWorkoutForDay(3)
+	if off != nil {
+		t.Errorf("GetWorkoutForDay(3) = %v, want nil for off day", off)
+	}
+}
+
+func TestIsRateLimited(t *testing.T) {
+	userID := int64(99999)
+
+	if isRateLimited(userID) {
+		t.Error("first call should not be rate limited")
+	}
+	if !isRateLimited(userID) {
+		t.Error("second call within 3s should be rate limited")
+	}
+}
+
+func TestMoodRecommendation(t *testing.T) {
+	tests := []struct {
+		mood    string
+		energy  int
+		wantSub string
+	}{
+		{"bad", 2, "istirahat"},
+		{"low", 3, "ringan"},
+		{"okay", 5, "moderate"},
+		{"good", 7, "siap"},
+		{"great", 9, "keras"},
+	}
+	for _, tt := range tests {
+		got := moodRecommendation(tt.mood, tt.energy)
+		if !strings.Contains(got, tt.wantSub) {
+			t.Errorf("moodRecommendation(%q, %d) = %q, want substring %q", tt.mood, tt.energy, got, tt.wantSub)
+		}
+	}
+}
+
+func TestFormatWorkoutForDisplayEmpty(t *testing.T) {
+	result := FormatWorkoutForDisplay(1, "Senin", "16 Juni", "push", "Push", nil, nil, nil)
+	if result == "" {
+		t.Error("FormatWorkoutForDisplay with empty exercises should not be empty")
+	}
+}
+
+func TestParseWorkoutToolResultMinimal(t *testing.T) {
+	data := "workout_id:1|day_name:Senin|date:16 Juni|type:push|type_name:Push"
+	_, _, _, _, _, _, _, err := ParseWorkoutToolResult(data)
+	if err != nil {
+		t.Fatalf("ParseWorkoutToolResult minimal should not error: %v", err)
+	}
+}
+
+func TestParseWorkoutToolResultInvalidHeader(t *testing.T) {
+	data := "garbage_data"
+	workoutID, _, _, _, _, _, _, err := ParseWorkoutToolResult(data)
+	if err != nil {
+		t.Error("ParseWorkoutToolResult with garbage should not error, just return zero values")
+	}
+	if workoutID != 0 {
+		t.Errorf("workoutID = %d, want 0 for invalid header", workoutID)
+	}
 }
