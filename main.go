@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -58,6 +60,18 @@ func main() {
 	updates := app.Bot.GetUpdatesChan(u)
 
 	slog.Info("bot is running, waiting for messages...")
+
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		if err := db.Ping(); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprintf(w, "{\"status\":\"unhealthy\",\"db\":\"error\"}")
+			return
+		}
+		fmt.Fprintf(w, "{\"status\":\"healthy\",\"db\":\"ok\"}")
+	})
+
+	go http.ListenAndServe(":9401", nil)
+	slog.Info("health check endpoint on :9401/health")
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)

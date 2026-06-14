@@ -74,6 +74,12 @@ func (app *BotApp) HandleUpdate(update tgbotapi.Update) {
 		return
 	}
 
+	if msg.IsCommand() && msg.Command() == "reset" {
+		ClearOldChatHistory(userID, 0)
+		app.SendMessage(chatID, "🔄 Chat history udah direset! Mulai dari awal ya.")
+		return
+	}
+
 	if msg.Text != "" {
 		app.SendTyping(chatID)
 		response := ChatWithLLM(userID, msg.Text)
@@ -351,7 +357,6 @@ func (app *BotApp) handleWorkoutLogInput(userID, chatID int64, text string, sess
 	}
 }
 
-// SendWorkoutNotification sends the daily workout to a user via LLM.
 func (app *BotApp) SendWorkoutNotification(userID int64) {
 	now := time.Now()
 	dayOfWeek := int(now.Weekday())
@@ -362,14 +367,21 @@ func (app *BotApp) SendWorkoutNotification(userID int64) {
 	workoutType := GetWorkoutType(dayOfWeek)
 	dayName := DayNames[dayOfWeek]
 
-	var prompt string
-	if workoutType == "" {
-		prompt = "Hari ini bukan hari latihan. Kasih semangat aja buat istirahat dan recovery."
-	} else {
-		typeName := WorkoutTypeNames[workoutType]
-		prompt = fmt.Sprintf("Sudah pagi! Hari ini %s, waktunya latihan %s. Generate workout untuk hari ini ya!", dayName, typeName)
+	user, _ := GetUser(userID)
+	streak := 0
+	if user != nil {
+		streak = user.Streak
 	}
 
+	var prompt string
+	if workoutType == "" {
+		prompt = fmt.Sprintf("Hari ini %s, bukan hari latihan. Kasih semangat buat istirahat dan recovery. Streak user: %d hari.", dayName, streak)
+	} else {
+		typeName := WorkoutTypeNames[workoutType]
+		prompt = fmt.Sprintf("Pagi! Hari ini %s, waktunya latihan %s. Generate workout untuk hari ini. Streak user: %d hari.", dayName, typeName, streak)
+	}
+
+	app.SendTyping(userID)
 	response := ChatWithLLM(userID, prompt)
 
 	workoutID := app.extractWorkoutIDFromResponse(userID, response)
@@ -385,9 +397,14 @@ func (app *BotApp) SendWorkoutNotification(userID int64) {
 	}
 }
 
-// SendWeightReminder sends a weight reminder via LLM
 func (app *BotApp) SendWeightReminder(userID int64) {
-	prompt := "Waktunya timbang! Kirim berat badanmu hari ini ya. Ketik angkanya saja, contoh: 71.5"
+	user, _ := GetUser(userID)
+	streak := 0
+	if user != nil {
+		streak = user.Streak
+	}
+	prompt := fmt.Sprintf("Waktunya timbang! Streak user: %d hari. Minta user kirim berat badannya.", streak)
+	app.SendTyping(userID)
 	response := ChatWithLLM(userID, prompt)
 	app.SendMessage(userID, response)
 }

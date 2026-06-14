@@ -82,6 +82,14 @@ type Stats struct {
 	Streak           int
 }
 
+type MoodLog struct {
+	ID       int64
+	UserID   int64
+	Mood     string
+	Energy   int
+	LoggedAt time.Time
+}
+
 // ChatMessage stores a single message in conversation history.
 type ChatMessage struct {
 	ID        int64

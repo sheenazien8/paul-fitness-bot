@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -16,63 +17,65 @@ const (
 	defaultLLMBaseURL   = "http://localhost:11434"
 	defaultLLMModel    = "glm-5.1:cloud"
 	llmTimeout         = 60 * time.Second
+	llmMaxRetries      = 2
 	chatHistoryLimit   = 20
+	rateLimitCooldown  = 3 * time.Second
 )
 
-type ollamaChatRequest struct {
+type llmChatRequest struct {
 	Model    string        `json:"model"`
-	Messages []ollamaMsg   `json:"messages"`
+	Messages []llmMsg   `json:"messages"`
 	Stream   bool          `json:"stream"`
 	Format   string        `json:"format,omitempty"`
-	Tools    []ollamaTool  `json:"tools,omitempty"`
+	Tools    []llmTool  `json:"tools,omitempty"`
 }
 
-type ollamaMsg struct {
+type llmMsg struct {
 	Role      string        `json:"role"`
 	Content   string        `json:"content"`
-	ToolCalls []ollamaToolCall `json:"tool_calls,omitempty"`
+	ToolCalls []llmToolCall `json:"tool_calls,omitempty"`
 }
 
-type ollamaToolCall struct {
-	Function ollamaFunctionCall `json:"function"`
+type llmToolCall struct {
+	Function llmFunctionCall `json:"function"`
 }
 
-type ollamaFunctionCall struct {
+type llmFunctionCall struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
 }
 
-type ollamaTool struct {
+type llmTool struct {
 	Type     string           `json:"type"`
-	Function ollamaToolDef    `json:"function"`
+	Function llmToolDef    `json:"function"`
 }
 
-type ollamaToolDef struct {
+type llmToolDef struct {
 	Name        string             `json:"name"`
 	Description  string             `json:"description"`
-	Parameters  ollamaToolParams   `json:"parameters"`
+	Parameters  llmToolParams   `json:"parameters"`
 }
 
-type ollamaToolParams struct {
+type llmToolParams struct {
 	Type       string                       `json:"type"`
 	Required   []string                     `json:"required,omitempty"`
-	Properties map[string]ollamaToolProp     `json:"properties"`
+	Properties map[string]llmToolProp     `json:"properties"`
 }
 
-type ollamaToolProp struct {
+type llmToolProp struct {
 	Type        string   `json:"type"`
 	Description string   `json:"description"`
 	Enum        []string `json:"enum,omitempty"`
 }
 
-type ollamaChatResponse struct {
+type llmChatResponse struct {
 	Model     string           `json:"model"`
-	Message   ollamaMsg        `json:"message"`
+	Message   llmMsg        `json:"message"`
 	Done      bool             `json:"done"`
 	Error     string           `json:"error,omitempty"`
 }
 
-type openAIChatResponse struct {
+type llmChatAPIResponse struct {
 	ID      string `json:"id"`
 	Model   string `json:"model"`
 	Choices []struct {
@@ -96,17 +99,17 @@ type openAIChatResponse struct {
 	} `json:"error,omitempty"`
 }
 
-func getToolDefinitions() []ollamaTool {
-	return []ollamaTool{
+func getToolDefinitions() []llmTool {
+	return []llmTool{
 		{
 			Type: "function",
-			Function: ollamaToolDef{
+			Function: llmToolDef{
 				Name:        "generate_workout",
 				Description: "Generate a workout routine for today based on the user's profile, preferences, and history. Returns structured exercise data (warmup, main, cooldown).",
-				Parameters: ollamaToolParams{
+				Parameters: llmToolParams{
 					Type:     "object",
 					Required: []string{},
-					Properties: map[string]ollamaToolProp{
+					Properties: map[string]llmToolProp{
 						"day_type": {
 							Type:        "string",
 							Description: "Override workout type (push/pull/legs/full_body). If not specified, uses the user's schedule for today.",
@@ -118,13 +121,13 @@ func getToolDefinitions() []ollamaTool {
 		},
 		{
 			Type: "function",
-			Function: ollamaToolDef{
+			Function: llmToolDef{
 				Name:        "log_weight",
 				Description: "Log the user's body weight. Updates their current weight and BMI in the profile.",
-				Parameters: ollamaToolParams{
+				Parameters: llmToolParams{
 					Type:     "object",
 					Required: []string{"weight"},
-					Properties: map[string]ollamaToolProp{
+					Properties: map[string]llmToolProp{
 						"weight": {
 							Type:        "number",
 							Description: "Weight in kg",
@@ -135,13 +138,13 @@ func getToolDefinitions() []ollamaTool {
 		},
 		{
 			Type: "function",
-			Function: ollamaToolDef{
+			Function: llmToolDef{
 				Name:        "log_workout_done",
 				Description: "Log a completed workout session with duration, calories burned, and satisfaction rating.",
-				Parameters: ollamaToolParams{
+				Parameters: llmToolParams{
 					Type:     "object",
 					Required: []string{"duration_minutes", "calories", "satisfaction"},
-					Properties: map[string]ollamaToolProp{
+					Properties: map[string]llmToolProp{
 						"duration_minutes": {
 							Type:        "integer",
 							Description: "Workout duration in minutes",
@@ -160,25 +163,25 @@ func getToolDefinitions() []ollamaTool {
 		},
 		{
 			Type: "function",
-			Function: ollamaToolDef{
+			Function: llmToolDef{
 				Name:        "get_stats",
 				Description: "Get the user's fitness stats including current weight, BMI, target progress, weekly workout stats, and streak.",
-				Parameters: ollamaToolParams{
+				Parameters: llmToolParams{
 					Type:       "object",
 					Required:   []string{},
-					Properties: map[string]ollamaToolProp{},
+					Properties: map[string]llmToolProp{},
 				},
 			},
 		},
 		{
 			Type: "function",
-			Function: ollamaToolDef{
+			Function: llmToolDef{
 				Name:        "get_history",
 				Description: "Get the user's recent workout history with scores and details.",
-				Parameters: ollamaToolParams{
+				Parameters: llmToolParams{
 					Type:     "object",
 					Required: []string{},
-					Properties: map[string]ollamaToolProp{
+					Properties: map[string]llmToolProp{
 						"limit": {
 							Type:        "integer",
 							Description: "Number of recent workouts to return (default 10)",
@@ -189,25 +192,25 @@ func getToolDefinitions() []ollamaTool {
 		},
 		{
 			Type: "function",
-			Function: ollamaToolDef{
+			Function: llmToolDef{
 				Name:        "get_user_profile",
 				Description: "Get the user's full profile including personal data, preferences, equipment, and onboarding status.",
-				Parameters: ollamaToolParams{
+				Parameters: llmToolParams{
 					Type:       "object",
 					Required:   []string{},
-					Properties: map[string]ollamaToolProp{},
+					Properties: map[string]llmToolProp{},
 				},
 			},
 		},
 		{
 			Type: "function",
-			Function: ollamaToolDef{
+			Function: llmToolDef{
 				Name:        "update_profile",
 				Description: "Update the user's profile fields like weight, height, target weight. Also used during onboarding to set up initial data.",
-				Parameters: ollamaToolParams{
+				Parameters: llmToolParams{
 					Type:     "object",
 					Required: []string{},
-					Properties: map[string]ollamaToolProp{
+					Properties: map[string]llmToolProp{
 						"weight": {
 							Type:        "number",
 							Description: "Current weight in kg",
@@ -248,13 +251,13 @@ func getToolDefinitions() []ollamaTool {
 		},
 		{
 			Type: "function",
-			Function: ollamaToolDef{
+			Function: llmToolDef{
 				Name:        "update_settings",
 				Description: "Update the user's workout schedule and notification time.",
-				Parameters: ollamaToolParams{
+				Parameters: llmToolParams{
 					Type:     "object",
 					Required: []string{},
-					Properties: map[string]ollamaToolProp{
+					Properties: map[string]llmToolProp{
 						"workout_days": {
 							Type:        "string",
 							Description: "Comma-separated day numbers (1=Senin, 2=Selasa, 3=Rabu, 4=Kamis, 5=Jumat, 6=Sabtu, 7=Minggu)",
@@ -269,13 +272,52 @@ func getToolDefinitions() []ollamaTool {
 		},
 		{
 			Type: "function",
-			Function: ollamaToolDef{
+			Function: llmToolDef{
 				Name:        "complete_onboarding",
 				Description: "Mark the user's onboarding as complete after all profile data has been collected.",
-				Parameters: ollamaToolParams{
+				Parameters: llmToolParams{
 					Type:       "object",
 					Required:   []string{},
-					Properties: map[string]ollamaToolProp{},
+					Properties: map[string]llmToolProp{},
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: llmToolDef{
+				Name:        "get_exercise_tips",
+				Description: "Get form tips and how-to for a specific exercise from the workout pool. Use when user asks about proper form, technique, or alternatives for an exercise.",
+				Parameters: llmToolParams{
+					Type:       "object",
+					Required:   []string{"exercise_name"},
+					Properties: map[string]llmToolProp{
+						"exercise_name": {
+							Type:        "string",
+							Description: "Name of the exercise to get tips for",
+						},
+					},
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: llmToolDef{
+				Name:        "log_mood",
+				Description: "Log the user's mood/energy level before or after workout. Helps track wellness and adjust workout intensity.",
+				Parameters: llmToolParams{
+					Type:       "object",
+					Required:   []string{"mood", "energy"},
+					Properties: map[string]llmToolProp{
+						"mood": {
+							Type:        "string",
+							Description: "User's mood: great, good, okay, low, bad",
+							Enum:        []string{"great", "good", "okay", "low", "bad"},
+						},
+						"energy": {
+							Type:        "integer",
+							Description: "Energy level from 1-10",
+						},
+					},
 				},
 			},
 		},
@@ -293,6 +335,8 @@ Penting:
 - Kalau user bilang latihan selesai atau lapor durasi → call log_workout_done
 - Kalau user tanya progress/stats → call get_stats
 - Kalau user tanya riwayat → call get_history
+- Kalau user tanya cara/form exercise → call get_exercise_tips
+- Kalau user bilang mood/energi (contoh: "lagi semangat", "aku capek", "mood aku bagus") → call log_mood
 - Jangan kasih nomor list kecuali untuk exercise list
 - Exercise list format WAJIB konsisten (ini data, bukan kalimat):
 
@@ -316,7 +360,7 @@ Penting:
 - Jangan halusinasi exercise — hanya gunakan data dari tool generate_workout
 - Motivasi tapi gak cringe
 - Jawab singkat, padat, gak bertele-tele
-- Kalau user baru dan belum onboarding, bantu mereka setup profil dengan ngobrol natural (tanya goal, experience, alat, berat, tinggi, target, hari latihan, jam notifikasi) — satu per satu, jangan semua sekaligus
+- Kalau user baru dan belum onboarding, bantu mereka setup profil. Tanya SATU PER SATU dengan urutan: (1) goal, (2) experience level, (3) alat yang dimiliki, (4) berat badan, (5) tinggi badan, (6) target berat, (7) hari latihan, (8) jam notifikasi. Setelah semua terisi, call complete_onboarding. JANGAN tanya semua sekaligus.
 - Untuk hari latihan, gunakan angka: 1=Senin, 2=Selasa, 3=Rabu, 4=Kamis, 5=Jumat, 6=Sabtu, 7=Minggu`
 
 	user, err := GetUser(userID)
@@ -380,6 +424,10 @@ func executeTool(userID int64, call ToolCall) ToolResult {
 		return toolUpdateSettings(userID, call.Arguments)
 	case "complete_onboarding":
 		return toolCompleteOnboarding(userID)
+	case "get_exercise_tips":
+		return toolGetExerciseTips(call.Arguments)
+	case "log_mood":
+		return toolLogMood(userID, call.Arguments)
 	default:
 		return ToolResult{ToolName: call.Name, Success: false, Error: fmt.Sprintf("unknown tool: %s", call.Name)}
 	}
@@ -794,6 +842,96 @@ func toolCompleteOnboarding(userID int64) ToolResult {
 	return ToolResult{ToolName: "complete_onboarding", Success: true, Data: "Onboarding selesai!"}
 }
 
+func toolGetExerciseTips(args map[string]interface{}) ToolResult {
+	name, ok := args["exercise_name"].(string)
+	if !ok || name == "" {
+		return ToolResult{ToolName: "get_exercise_tips", Success: false, Error: "Nama exercise tidak valid."}
+	}
+
+	name = strings.TrimSpace(name)
+	for _, pool := range WorkoutPool {
+		for _, group := range pool {
+			for _, ex := range group {
+				if strings.EqualFold(ex.Name, name) {
+					return ToolResult{
+						ToolName: "get_exercise_tips",
+						Success:  true,
+						Data:     fmt.Sprintf("%s: %s | Reps: %s | Otot: %s", ex.Name, ex.HowTo, ex.Reps, ex.Muscle),
+					}
+				}
+			}
+		}
+	}
+
+	for _, tips := range []struct {
+		name   string
+		howTo  string
+		muscle string
+	}{
+		{"Push-Up", "Tangan selebar bahu, turunkan badan sampai dada hampir menyentuh lantai, dorong kembali. Jangan arch back!", "Chest, Triceps, Shoulders"},
+		{"Plank", "Tahan posisi push-up atas dengan siku di bawah bahu. Jaga body straight line dari kepala sampai kaki.", "Core, Shoulders"},
+		{"Squat", "Kaki selebar bahu, turunkan pinggul seperti mau duduk. Lutut tidak boleh melewati ujung kaki. Punggung tetap tegak.", "Quads, Glutes, Hamstrings"},
+		{"Lunges", "Langkah maju satu kaki, turunkan pinggul sampai kedua lutut 90 derajat. Jangan biarkan lutut depan melewati jari kaki.", "Quads, Glutes"},
+		{"Burpees", "Dari berdiri, squat down, lompat ke posisi plank, push-up, lompat kembali ke squat, lalu jump up.", "Full Body, Cardio"},
+	} {
+		if strings.EqualFold(tips.name, name) {
+			return ToolResult{
+					ToolName: "get_exercise_tips",
+					Success:  true,
+					Data:     fmt.Sprintf("%s: %s | Otot: %s", tips.name, tips.howTo, tips.muscle),
+				}
+		}
+	}
+
+	return ToolResult{ToolName: "get_exercise_tips", Success: false, Error: fmt.Sprintf("Exercise '%s' tidak ditemukan di database.", name)}
+}
+
+func toolLogMood(userID int64, args map[string]interface{}) ToolResult {
+	mood, ok := args["mood"].(string)
+	if !ok || mood == "" {
+		return ToolResult{ToolName: "log_mood", Success: false, Error: "Mood tidak valid. Pilih: great, good, okay, low, bad"}
+	}
+
+	energy := 5
+	if e, ok := args["energy"].(float64); ok {
+		energy = int(e)
+	} else if e, ok := args["energy"].(int); ok {
+		energy = e
+	}
+	if energy < 1 {
+		energy = 1
+	}
+	if energy > 10 {
+		energy = 10
+	}
+
+	if err := SaveMoodLog(userID, mood, energy); err != nil {
+		return ToolResult{ToolName: "log_mood", Success: false, Error: "Gagal menyimpan mood."}
+	}
+
+	moodLabels := map[string]string{"great": "Luar biasa! 🤩", "good": "Bagus! 😊", "okay": "Biasa aja 😐", "low": "Lagi nggak semangat 😔", "bad": "Lagi down 😢"}
+	label := moodLabels[mood]
+	if label == "" {
+		label = mood
+	}
+
+	return ToolResult{
+		ToolName: "log_mood",
+		Success:  true,
+		Data:     fmt.Sprintf("Mood tercatat: %s | Energy: %d/10. %s", label, energy, moodRecommendation(mood, energy)),
+	}
+}
+
+func moodRecommendation(mood string, energy int) string {
+	if mood == "bad" || mood == "low" || energy <= 3 {
+		return "Mungkin latihan ringan aja hari ini, atau istirahat total juga oke!"
+	}
+	if energy <= 5 {
+		return "Coba latihan moderate aja, jangan push terlalu keras."
+	}
+	return "Sepertinya kamu siap buat latihan keras! Gas! 💪"
+}
+
 func tryLLMWorkout(userID int64, dayType string) *LLMWorkoutResponse {
 	user, err := GetUser(userID)
 	if err != nil {
@@ -823,7 +961,7 @@ func GenerateWorkoutWithLLM(user *User, prefs *UserPreferences, dayType string, 
 
 	result, err := callLLMGenerate(prompt)
 	if err != nil {
-		return nil, fmt.Errorf("ollama call failed: %w", err)
+		return nil, fmt.Errorf("LLM call failed: %w", err)
 	}
 
 	var llmResp LLMWorkoutResponse
@@ -996,7 +1134,26 @@ func validateLLMResponse(resp *LLMWorkoutResponse) bool {
 	return true
 }
 
+var userLastRequest = make(map[int64]time.Time)
+var rateLimitMu sync.Mutex
+
+func isRateLimited(userID int64) bool {
+	rateLimitMu.Lock()
+	defer rateLimitMu.Unlock()
+
+	last, exists := userLastRequest[userID]
+	if exists && time.Since(last) < rateLimitCooldown {
+		return true
+	}
+	userLastRequest[userID] = time.Now()
+	return false
+}
+
 func ChatWithLLM(userID int64, userMessage string) string {
+	if isRateLimited(userID) {
+		return "Sabar ya, tunggu bentar lagi aku balas! ⏳"
+	}
+
 	systemPrompt := buildSystemPrompt(userID)
 
 	history, err := GetChatHistory(userID, chatHistoryLimit)
@@ -1005,23 +1162,24 @@ func ChatWithLLM(userID int64, userMessage string) string {
 		history = nil
 	}
 
-	messages := []ollamaMsg{
+	messages := []llmMsg{
 		{Role: "system", Content: systemPrompt},
 	}
 
 	for _, msg := range history {
-		messages = append(messages, ollamaMsg{Role: msg.Role, Content: msg.Content})
+		messages = append(messages, llmMsg{Role: msg.Role, Content: msg.Content})
 	}
 
-	messages = append(messages, ollamaMsg{Role: "user", Content: userMessage})
+	messages = append(messages, llmMsg{Role: "user", Content: userMessage})
 
 	SaveChatMessage(userID, "user", userMessage)
 
+	startTime := time.Now()
 	maxRounds := 3
 	for round := 0; round < maxRounds; round++ {
 		response, toolCalls, err := callLLMChatWithTools(messages)
 		if err != nil {
-			slog.Error("ollama chat failed", "round", round, "error", err)
+			slog.Error("LLM chat failed", "round", round, "duration", time.Since(startTime), "error", err)
 			fallbackMsg := "Maaf, aku lagi gangguan nih. Coba lagi ya! 🙏"
 			SaveChatMessage(userID, "assistant", fallbackMsg)
 			return fallbackMsg
@@ -1034,15 +1192,15 @@ func ChatWithLLM(userID int64, userMessage string) string {
 			return assistantContent
 		}
 
-		assistantMsg := ollamaMsg{
+		assistantMsg := llmMsg{
 			Role:      "assistant",
 			Content:   response,
-			ToolCalls: make([]ollamaToolCall, len(toolCalls)),
+			ToolCalls: make([]llmToolCall, len(toolCalls)),
 		}
 		for i, tc := range toolCalls {
 			argsBytes, _ := json.Marshal(tc.Arguments)
-			assistantMsg.ToolCalls[i] = ollamaToolCall{
-				Function: ollamaFunctionCall{
+			assistantMsg.ToolCalls[i] = llmToolCall{
+				Function: llmFunctionCall{
 					Name:      tc.Name,
 					Arguments: string(argsBytes),
 				},
@@ -1053,20 +1211,26 @@ func ChatWithLLM(userID int64, userMessage string) string {
 		for _, tc := range toolCalls {
 			result := executeTool(userID, tc)
 
-			resultJSON, _ := json.Marshal(map[string]interface{}{
+			resultJSON, err := json.Marshal(map[string]interface{}{
 				"tool_name": result.ToolName,
 				"success":   result.Success,
 				"data":      result.Data,
 				"error":     result.Error,
 			})
+			if err != nil {
+				slog.Error("marshal tool result failed", "tool", tc.Name, "error", err)
+				resultJSON = []byte(`{"tool_name":"` + tc.Name + `","success":false,"error":"internal error"}`)
+			}
 
-			messages = append(messages, ollamaMsg{
+			messages = append(messages, llmMsg{
 				Role:    "tool",
 				Content: string(resultJSON),
 			})
 
-			slog.Info("tool executed", "tool", tc.Name, "success", result.Success)
+			slog.Info("tool executed", "tool", tc.Name, "success", result.Success, "duration", time.Since(startTime))
 		}
+
+		SaveChatMessage(userID, "assistant", response)
 
 		// Continue loop — LLM will respond with the tool results incorporated
 	}
@@ -1121,6 +1285,7 @@ func callLLMGenerate(prompt string) (string, error) {
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
 
+	reqStart := time.Now()
 	slog.Info("calling LLM generate", "url", url, "model", model, "prompt_len", len(prompt))
 
 	client := &http.Client{Timeout: llmTimeout}
@@ -1144,11 +1309,13 @@ func callLLMGenerate(prompt string) (string, error) {
 		return "", fmt.Errorf("read response body: %w", err)
 	}
 
+	slog.Info("LLM generate response", "status", resp.StatusCode, "duration", time.Since(reqStart))
+
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("LLM returned status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	var chatResp openAIChatResponse
+	var chatResp llmChatAPIResponse
 	if err := json.Unmarshal(bodyBytes, &chatResp); err != nil {
 		return "", fmt.Errorf("decode response: %w", err)
 	}
@@ -1164,12 +1331,29 @@ func callLLMGenerate(prompt string) (string, error) {
 	return chatResp.Choices[0].Message.Content, nil
 }
 
-func callLLMChatWithTools(messages []ollamaMsg) (string, []ToolCall, error) {
+func callLLMChatWithTools(messages []llmMsg) (string, []ToolCall, error) {
+	var lastErr error
+	for attempt := 0; attempt < llmMaxRetries; attempt++ {
+		if attempt > 0 {
+			slog.Info("retrying LLM call", "attempt", attempt+1)
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+		}
+		content, toolCalls, err := doLLMChatRequest(messages)
+		if err == nil {
+			return content, toolCalls, nil
+		}
+		lastErr = err
+		slog.Warn("LLM call failed", "attempt", attempt+1, "error", err)
+	}
+	return "", nil, fmt.Errorf("LLM unavailable after %d retries: %w", llmMaxRetries, lastErr)
+}
+
+func doLLMChatRequest(messages []llmMsg) (string, []ToolCall, error) {
 	url := getLLMBaseURL() + "/v1/chat/completions"
 	model := getLLMModel()
 	apiKey := getLLMAPIKey()
 
-	reqBody := ollamaChatRequest{
+	reqBody := llmChatRequest{
 		Model:    model,
 		Messages: messages,
 		Stream:   false,
@@ -1181,6 +1365,7 @@ func callLLMChatWithTools(messages []ollamaMsg) (string, []ToolCall, error) {
 		return "", nil, fmt.Errorf("marshal request: %w", err)
 	}
 
+	reqStart := time.Now()
 	slog.Info("calling LLM chat", "url", url, "model", model, "messages", len(messages))
 
 	client := &http.Client{Timeout: llmTimeout}
@@ -1204,11 +1389,13 @@ func callLLMChatWithTools(messages []ollamaMsg) (string, []ToolCall, error) {
 		return "", nil, fmt.Errorf("read response body: %w", err)
 	}
 
+	slog.Info("LLM response received", "status", resp.StatusCode, "duration", time.Since(reqStart))
+
 	if resp.StatusCode != http.StatusOK {
 		return "", nil, fmt.Errorf("LLM returned status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	var chatResp openAIChatResponse
+	var chatResp llmChatAPIResponse
 	if err := json.Unmarshal(bodyBytes, &chatResp); err != nil {
 		slog.Error("failed to parse chat response", "error", err, "raw", truncateString(string(bodyBytes), 500))
 		return "", nil, fmt.Errorf("decode response: %w", err)
@@ -1344,7 +1531,7 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-type ollamaResponse struct {
+type llmGenerateResponse struct {
 	Response string `json:"response"`
 	Error    string `json:"error,omitempty"`
 }

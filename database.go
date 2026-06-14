@@ -107,6 +107,14 @@ func migrate() error {
 			FOREIGN KEY (user_id) REFERENCES users(user_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_chat_history_user ON chat_history(user_id, id)`,
+		`CREATE TABLE IF NOT EXISTS mood_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER,
+			mood TEXT NOT NULL,
+			energy INTEGER NOT NULL,
+			logged_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(user_id)
+		)`,
 	}
 
 	for _, m := range migrations {
@@ -490,4 +498,33 @@ func ClearOldChatHistory(userID int64, keepLast int) error {
 		)`, userID, userID, keepLast,
 	)
 	return err
+}
+
+func SaveMoodLog(userID int64, mood string, energy int) error {
+	_, err := db.Exec(
+		`INSERT INTO mood_logs (user_id, mood, energy, logged_at) VALUES (?, ?, ?, datetime('now'))`,
+		userID, mood, energy,
+	)
+	return err
+}
+
+func GetRecentMoodLogs(userID int64, limit int) ([]MoodLog, error) {
+	rows, err := db.Query(
+		`SELECT id, user_id, mood, energy, logged_at FROM mood_logs WHERE user_id = ? ORDER BY logged_at DESC LIMIT ?`,
+		userID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []MoodLog
+	for rows.Next() {
+		var l MoodLog
+		if err := rows.Scan(&l.ID, &l.UserID, &l.Mood, &l.Energy, &l.LoggedAt); err != nil {
+			return nil, err
+		}
+		logs = append(logs, l)
+	}
+	return logs, nil
 }
