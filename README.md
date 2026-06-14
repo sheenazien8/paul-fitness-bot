@@ -1,115 +1,54 @@
-# 💪 Workout Bot
+# 💪 Paul — Your Personal Fitness Assistant
 
-Telegram bot untuk latihan di rumah, dirancang untuk program diet/fat loss.
+AI-powered Telegram bot yang bantu kamu latihan di rumah. Chat langsung, workout auto-generate, progress otomatis terlacak.
 
 ## Fitur
 
-- 🏋️ **Jadwal Latihan Harian** — Push/Pull/Legs/Full Body split (Sen, Sel, Kam, Jum)
-- ⚖️ **Tracking Berat Badan** — Catat berat setiap pagi, lihat progress ke target
-- 📊 **Skor Latihan** — Skor 0-100 berdasarkan durasi, kalori, dan kepuasan
-- 📈 **Statistik & Progress** — BMI, streak, weekly summary
-- ⏰ **Reminder Otomatis** — Notifikasi pagi untuk latihan dan timbangan
-
-## Persyaratan
-
-- Go 1.23+
-- SQLite (modernc.org/sqlite - pure Go, no CGO needed)
-
-## Setup
-
-### 1. Buat Bot Token
-
-Chat dengan [@BotFather](https://t.me/BotFather) di Telegram:
-1. `/newbot`
-2. Pilih nama: `Workout Bot`
-3. Pilih username: `your_username_bot`
-4. Copy token yang diberikan
-
-### 2. Konfigurasi
-
-```bash
-cp .env.example .env
-# Edit .env, masukkan WORKOUT_BOT_TOKEN
-```
-
-### 3. Build & Jalankan
-
-```bash
-go build -o workout-bot .
-./workout-bot
-```
-
-### 4. Install sebagai systemd Service
-
-```bash
-sudo cp workout-bot.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable workout-bot
-sudo systemctl start workout-bot
-```
-
-## Perintah Bot
-
-| Perintah | Deskripsi |
-|----------|-----------|
-| `/start` | Pesan selamat datang & profil |
-| `/workout` | Lihat latihan hari ini |
-| `/weight` | Catat berat badan |
-| `/stats` | Statistik & progress |
-| `/history` | Riwayat latihan terakhir |
-| `/settings` | Ubah hari latihan & jam notifikasi |
+- 🏋️ **AI Chat** — Ngobrol soal fitness, tanya apa aja tentang workout & nutrisi
+- 🤖 **Auto Workout** — Latihan di-generate AI sesuai goal, level, dan alat kamu
+- ⚖️ **Weight Tracking** — Catat berat badan, lihat progress ke target
+- 📊 **Skor & Stats** — Skor 0-100 per latihan, streak, BMI, weekly report
+- 😊 **Mood & Energy** — Log mood sebelum workout, affect intensity suggestion
+- ⏰ **Smart Reminder** — Notifikasi latihan & timbangan otomatis
+- 📋 **Weekly Report** — Summary mingguan otomatis (bisa dimatikan via settings)
+- 🔄 **Exercise Tips** — Tanya form & tips buat exercise spesifik
 
 ## Cara Pakai
 
-### Latihan
-1. Bot mengirim menu latihan setiap pagi di hari latihan
-2. Setelah selesai, klik **✅ Selesai Latihan**
-3. Balas dengan format: `menit, kalori, tingkat puas (1-10)`
-   - Contoh: `45, 320, 7`
+1. Chat [@paul_gym_instructor_bot](https://t.me/paul_gym_instructor_bot) di Telegram
+2. `/start` — Paul bantu setup profil (goal, level, alat, jadwal)
+3. Setelah onboarding, tinggal chat natural — "hari ini latihan apa?", "aku 71.5 kg", "lagi capek nih"
+4. Klik **✅ Selesai Latihan** setelah workout, isi durasi & kalori
 
-### Berat Badan
-1. Bot mengirim reminder pagi: "☀️ Pagi! Masukkan berat badanmu..."
-2. Balas dengan angka saja: `71.5`
-3. Bot menampilkan progress ke target 65kg
+## Perintah
+
+| Perintah | Deskripsi |
+|----------|-----------|
+| `/start` | Setup profil & onboarding |
+| `/reset` | Reset chat history |
+
+Selebihnya tinggal chat natural — Paul ngerti konteks dan data kamu.
 
 ## Skor Latihan
 
-Formula: `(durasi_score × 0.3) + (kalori_score × 0.3) + (kepuasan_score × 0.4)`
+Formula: `(durasi × 0.3) + (kalori × 0.3) + (kepuasan × 0.4)`
 
-- **Durasi**: Maksimal di 60 menit (lebih lama tidak menambah skor)
-- **Kalori**: Maksimal di 500 kalori
-- **Kepuasan**: 1-10 langsung dikonversi ke 0-100
+Kepuasan punya bobot terbesar — karena konsisten & menikmati latihan lebih penting dari sekadar angka.
 
-Bobot terbesar ada di kepuasan (40%) — karena konsisten dan menikmati latihan lebih penting dari sekadar angka.
-
-## Alat Latihan
+## Alat yang Didukung
 
 - Dumbbell
 - Resistance band
 - Pull-up bar
 
-## Jadwal Split
-
-| Hari | Tipe | Fokus |
-|------|------|-------|
-| Senin | Push | Dada, Bahu, Tricep |
-| Selasa | Legs | Kaki, Glute |
-| Rabu | Rest | — |
-| Kamis | Pull | Punggung, Bicep |
-| Jumat | Full Body | Seluruh tubuh |
-| Sabtu-Minggu | Rest | — |
-
-## Profil Default
-
-- Berat: 72kg
-- Tinggi: 167cm
-- Target: 65kg
-- BMI: ~25.8 (Gemuk)
-
 ## Teknologi
 
 - **Go** — Bahasa utama
-- **SQLite** (modernc.org/sqlite) — Database, pure Go tanpa CGO
+- **SQLite** (modernc.org/sqlite) — Database, pure Go
+- **Ollama** — LLM engine (glm-5.1:cloud)
 - **go-telegram-bot-api/v5** — Telegram Bot API
-- **robfig/cron/v3** — Penjadwalan
-- **log/slog** — Structured logging
+- **robfig/cron/v3** — Scheduling
+
+---
+
+Made by [Sheena](https://sheenazien.me) ⚡
