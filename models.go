@@ -112,3 +112,17 @@ type ToolResult struct {
 	Data     string `json:"data"`
 	Error    string `json:"error,omitempty"`
 }
+
+// WeeklyStats holds aggregated stats for the weekly report.
+type WeeklyStats struct {
+	WorkoutCount   int
+	TotalDuration   int
+	TotalCalories   int
+	AvgSatisfaction float64
+	StreakDays      int
+	WeightStart     float64
+	WeightEnd       float64
+	WeightChange    float64
+	BestDay         string
+	BestScore       float64
+}

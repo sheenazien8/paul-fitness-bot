@@ -564,3 +564,86 @@ func InvalidateSummaries(userID int64) error {
 	_, err := db.Exec(`DELETE FROM chat_summaries WHERE user_id = ?`, userID)
 	return err
 }
+
+func GetAllActiveUsers() ([]User, error) {
+	rows, err := db.Query(
+		`SELECT u.user_id, u.username, u.first_name, u.weight, u.height, u.target_weight,
+		        u.workout_days, u.notification_hour, u.streak, u.last_workout_date,
+		        u.created_at, u.updated_at
+		 FROM users u
+		 JOIN user_preferences p ON u.user_id = p.user_id
+		 WHERE p.onboarding_done = 1`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []User
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.UserID, &u.Username, &u.FirstName, &u.Weight, &u.Height, &u.TargetWeight,
+			&u.WorkoutDays, &u.NotificationHour, &u.Streak, &u.LastWorkoutDate, &u.CreatedAt, &u.UpdatedAt); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	return users, nil
+}
+
+func GetWeeklyStats(userID int64) (*WeeklyStats, error) {
+	stats := &WeeklyStats{}
+
+	err := db.QueryRow(
+		`SELECT COUNT(*), COALESCE(SUM(duration_minutes), 0), COALESCE(SUM(calories), 0),
+		        COALESCE(AVG(satisfaction), 0), COALESCE(MAX(score), 0)
+		 FROM workout_logs WHERE user_id = ? AND logged_at >= date('now', '-7 days')`,
+		userID,
+	).Scan(&stats.WorkoutCount, &stats.TotalDuration, &stats.TotalCalories, &stats.AvgSatisfaction, &stats.BestScore)
+	if err != nil {
+		return nil, err
+	}
+
+	var weightStart, weightEnd float64
+	err = db.QueryRow(
+		`SELECT weight FROM weight_logs WHERE user_id = ? AND logged_at < date('now', '-6 days') ORDER BY logged_at DESC LIMIT 1`,
+		userID,
+	).Scan(&weightStart)
+	if err != nil {
+		weightStart = 0
+	}
+
+	err = db.QueryRow(
+		`SELECT weight FROM weight_logs WHERE user_id = ? ORDER BY logged_at DESC LIMIT 1`,
+		userID,
+	).Scan(&weightEnd)
+	if err != nil {
+		weightEnd = 0
+	}
+
+	stats.WeightStart = weightStart
+	stats.WeightEnd = weightEnd
+	if weightStart > 0 && weightEnd > 0 {
+		stats.WeightChange = weightEnd - weightStart
+	}
+
+	err = db.QueryRow(
+		`SELECT streak FROM users WHERE user_id = ?`, userID,
+	).Scan(&stats.StreakDays)
+	if err != nil {
+		stats.StreakDays = 0
+	}
+
+	var bestDayName string
+	err = db.QueryRow(
+		`SELECT COALESCE(strftime('%w', logged_at), '') FROM workout_logs
+		 WHERE user_id = ? AND logged_at >= date('now', '-7 days') AND score = ? LIMIT 1`,
+		userID, stats.BestScore,
+	).Scan(&bestDayName)
+	if err == nil && bestDayName != "" {
+		dayMap := map[string]string{"0": "Minggu", "1": "Senin", "2": "Selasa", "3": "Rabu", "4": "Kamis", "5": "Jumat", "6": "Sabtu"}
+		stats.BestDay = dayMap[bestDayName]
+	}
+
+	return stats, nil
+}

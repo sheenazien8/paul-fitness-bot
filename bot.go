@@ -410,6 +410,23 @@ func (app *BotApp) SendWeightReminder(userID int64) {
 	app.SendMessage(userID, response)
 }
 
+func (app *BotApp) SendWeeklyReport(userID int64) {
+	stats, err := GetWeeklyStats(userID)
+	if err != nil {
+		slog.Error("weekly report: get stats failed", "user_id", userID, "error", err)
+		return
+	}
+
+	report := FormatWeeklyReport(stats)
+	if stats.WorkoutCount > 0 {
+		app.SendTyping(userID)
+		motivation := ChatWithLLM(userID, "Kirim pesan motivasi singkat (1-2 kalimat) untuk laporan mingguan user ini. Bahasa Indonesia, casual, pakai 'kamu'.")
+		report += "\n---\n" + motivation
+	}
+
+	app.SendMessage(userID, report)
+}
+
 func parseWorkoutDays(days string) []int {
 	var result []int
 	for _, s := range strings.Split(days, ",") {

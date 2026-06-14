@@ -49,6 +49,9 @@ func main() {
 		SendWeightReminder: func(userID int64) {
 			app.SendWeightReminder(userID)
 		},
+		SendWeeklyReport: func(userID int64) {
+			app.SendWeeklyReport(userID)
+		},
 	}); err != nil {
 		slog.Error("failed to initialize scheduler", "error", err)
 		os.Exit(1)
