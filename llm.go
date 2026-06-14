@@ -267,6 +267,10 @@ func getToolDefinitions() []llmTool {
 							Type:        "integer",
 							Description: "Hour for daily notification (0-23, WIB timezone)",
 						},
+						"weekly_report": {
+							Type:        "boolean",
+							Description: "Enable or disable weekly report notifications (Monday 07:00 WIB)",
+						},
 					},
 				},
 			},
@@ -328,6 +332,8 @@ func getToolDefinitions() []llmTool {
 func buildSystemPrompt(userID int64) string {
 	basePrompt := `Kamu adalah Paul, personal trainer AI yang friendly dan supportive. Bahasa utama Indonesia, casual pakai "kamu".
 
+Kamu HANYA bicara soal fitness — workout, nutrisi, berat badan, kesehatan tubuh, olahraga, dan topik yang berkaitan langsung. Kalau user nanya di luar itu (politik, gosip, matematika, keuangan, dll), tolak dengan natural dan casual — jangan kaku, jangan mesum, tapi tetap tegas bahwa itu bukan bidangmu. Boleh pakai humor atau analogi fitness buat nolak. JANGAN pernah jawab pertanyaan di luar fitness, bahkan singkat pun tidak.
+
 Kamu punya akses ke data user dan bisa melakukan aksi melalui tools. Gunakan tools ketika user meminta sesuatu yang butuh data/action, bukan saat hanya ngobrol.
 
 Penting:
@@ -362,7 +368,8 @@ Penting:
 - Motivasi tapi gak cringe
 - Jawab singkat, padat, gak bertele-tele
 - Kalau user baru dan belum onboarding, bantu mereka setup profil. Tanya SATU PER SATU dengan urutan: (1) goal, (2) experience level, (3) alat yang dimiliki, (4) berat badan, (5) tinggi badan, (6) target berat, (7) hari latihan, (8) jam notifikasi. Setelah semua terisi, call complete_onboarding. JANGAN tanya semua sekaligus.
-- Untuk hari latihan, gunakan angka: 1=Senin, 2=Selasa, 3=Rabu, 4=Kamis, 5=Jumat, 6=Sabtu, 7=Minggu`
+- Untuk hari latihan, gunakan angka: 1=Senin, 2=Selasa, 3=Rabu, 4=Kamis, 5=Jumat, 6=Sabtu, 7=Minggu
+- Kalau user mau matikan/nyalakan laporan mingguan → call update_settings dengan weekly_report=true/false`
 
 	user, err := GetUser(userID)
 	if err == nil && user != nil {
@@ -398,6 +405,7 @@ Penting:
 		basePrompt += fmt.Sprintf("Resistance Band: %v\n", prefs.HasResistanceBand)
 		basePrompt += fmt.Sprintf("Pull-up Bar: %v\n", prefs.HasPullupBar)
 		basePrompt += fmt.Sprintf("Onboarding selesai: %v\n", prefs.OnboardingDone)
+		basePrompt += fmt.Sprintf("Laporan mingguan: %v\n", prefs.WeeklyReport)
 	}
 
 	return basePrompt
@@ -825,6 +833,12 @@ func toolUpdateSettings(userID int64, args map[string]interface{}) ToolResult {
 
 	if err := UpdateUserSettings(userID, workoutDays, notifHour); err != nil {
 		return ToolResult{ToolName: "update_settings", Success: false, Error: "Gagal update pengaturan."}
+	}
+
+	if wr, ok := args["weekly_report"].(bool); ok {
+		if err := UpdateUserPreferenceField(userID, "weekly_report", boolToInt(wr)); err != nil {
+			return ToolResult{ToolName: "update_settings", Success: false, Error: "Gagal update weekly report setting."}
+		}
 	}
 
 	_ = UpdateUserSchedule(userID)

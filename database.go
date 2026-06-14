@@ -133,6 +133,11 @@ func migrate() error {
 			return fmt.Errorf("migration failed: %w", err)
 		}
 	}
+
+	if _, err := db.Exec(`ALTER TABLE user_preferences ADD COLUMN weekly_report INTEGER DEFAULT 1`); err != nil {
+		slog.Debug("weekly_report column may already exist", "error", err)
+	}
+
 	return nil
 }
 
@@ -395,9 +400,9 @@ func GetUserStats(userID int64) (*Stats, error) {
 func GetUserPreferences(userID int64) (*UserPreferences, error) {
 	p := &UserPreferences{}
 	err := db.QueryRow(
-		`SELECT user_id, goal, experience_level, has_dumbbell, has_resistance_band, has_pullup_bar, onboarding_done
+		`SELECT user_id, goal, experience_level, has_dumbbell, has_resistance_band, has_pullup_bar, onboarding_done, COALESCE(weekly_report, 1)
 		 FROM user_preferences WHERE user_id = ?`, userID,
-	).Scan(&p.UserID, &p.Goal, &p.ExperienceLevel, &p.HasDumbbell, &p.HasResistanceBand, &p.HasPullupBar, &p.OnboardingDone)
+	).Scan(&p.UserID, &p.Goal, &p.ExperienceLevel, &p.HasDumbbell, &p.HasResistanceBand, &p.HasPullupBar, &p.OnboardingDone, &p.WeeklyReport)
 	if err != nil {
 		p.UserID = userID
 		p.Goal = "diet"
@@ -406,6 +411,7 @@ func GetUserPreferences(userID int64) (*UserPreferences, error) {
 		p.HasResistanceBand = true
 		p.HasPullupBar = true
 		p.OnboardingDone = false
+		p.WeeklyReport = true
 		return p, nil
 	}
 	return p, nil
@@ -413,9 +419,9 @@ func GetUserPreferences(userID int64) (*UserPreferences, error) {
 
 func CreateUserPreferences(p *UserPreferences) error {
 	_, err := db.Exec(
-		`INSERT OR REPLACE INTO user_preferences (user_id, goal, experience_level, has_dumbbell, has_resistance_band, has_pullup_bar, onboarding_done)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		p.UserID, p.Goal, p.ExperienceLevel, boolToInt(p.HasDumbbell), boolToInt(p.HasResistanceBand), boolToInt(p.HasPullupBar), boolToInt(p.OnboardingDone),
+		`INSERT OR REPLACE INTO user_preferences (user_id, goal, experience_level, has_dumbbell, has_resistance_band, has_pullup_bar, onboarding_done, weekly_report)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.UserID, p.Goal, p.ExperienceLevel, boolToInt(p.HasDumbbell), boolToInt(p.HasResistanceBand), boolToInt(p.HasPullupBar), boolToInt(p.OnboardingDone), boolToInt(p.WeeklyReport),
 	)
 	return err
 }
@@ -429,7 +435,7 @@ func UpdateUserPreferenceField(userID int64, field string, value interface{}) er
 			userID, value,
 		)
 		return err
-	case "has_dumbbell", "has_resistance_band", "has_pullup_bar":
+	case "has_dumbbell", "has_resistance_band", "has_pullup_bar", "weekly_report":
 		_, err := db.Exec(
 			`INSERT INTO user_preferences (user_id, `+field+`, onboarding_done) VALUES (?, ?, 0)
 			 ON CONFLICT(user_id) DO UPDATE SET `+field+` = excluded.`+field,

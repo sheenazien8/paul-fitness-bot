@@ -83,6 +83,15 @@ func sendWeeklyReports() {
 		return
 	}
 	for _, user := range users {
+		prefs, err := GetUserPreferences(user.UserID)
+		if err != nil {
+			slog.Error("weekly report: get preferences failed", "user_id", user.UserID, "error", err)
+			continue
+		}
+		if !prefs.WeeklyReport {
+			slog.Info("weekly report: skipped (disabled)", "user_id", user.UserID)
+				continue
+		}
 		callbacks.SendWeeklyReport(user.UserID)
 	}
 }

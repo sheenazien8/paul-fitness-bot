@@ -27,6 +27,7 @@ type UserPreferences struct {
 	HasResistanceBand bool
 	HasPullupBar      bool
 	OnboardingDone    bool
+	WeeklyReport      bool
 }
 
 type LLMWorkoutResponse struct {
