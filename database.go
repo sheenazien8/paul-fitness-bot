@@ -115,6 +115,17 @@ func migrate() error {
 			logged_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (user_id) REFERENCES users(user_id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS chat_summaries (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			summary TEXT NOT NULL,
+			from_message_id INTEGER NOT NULL,
+			to_message_id INTEGER NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(user_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_chat_summaries_user ON chat_summaries(user_id)`,
 	}
 
 	for _, m := range migrations {
@@ -527,4 +538,29 @@ func GetRecentMoodLogs(userID int64, limit int) ([]MoodLog, error) {
 		logs = append(logs, l)
 	}
 	return logs, nil
+}
+
+func GetCachedSummary(userID int64, fromID, toID int64) string {
+	var summary string
+	err := db.QueryRow(
+		`SELECT summary FROM chat_summaries WHERE user_id = ? AND from_message_id = ? AND to_message_id = ? ORDER BY id DESC LIMIT 1`,
+		userID, fromID, toID,
+	).Scan(&summary)
+	if err != nil {
+		return ""
+	}
+	return summary
+}
+
+func SaveCachedSummary(userID int64, fromID, toID int64, summary string) error {
+	_, err := db.Exec(
+		`INSERT INTO chat_summaries (user_id, summary, from_message_id, to_message_id) VALUES (?, ?, ?, ?)`,
+		userID, summary, fromID, toID,
+	)
+	return err
+}
+
+func InvalidateSummaries(userID int64) error {
+	_, err := db.Exec(`DELETE FROM chat_summaries WHERE user_id = ?`, userID)
+	return err
 }

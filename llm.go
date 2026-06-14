@@ -19,6 +19,7 @@ const (
 	llmTimeout         = 60 * time.Second
 	llmMaxRetries      = 2
 	chatHistoryLimit   = 20
+	historyFetchLimit  = 40
 	rateLimitCooldown  = 3 * time.Second
 )
 
@@ -1156,7 +1157,7 @@ func ChatWithLLM(userID int64, userMessage string) string {
 
 	systemPrompt := buildSystemPrompt(userID)
 
-	history, err := GetChatHistory(userID, chatHistoryLimit)
+	history, err := GetChatHistory(userID, historyFetchLimit)
 	if err != nil {
 		slog.Error("get chat history failed", "user_id", userID, "error", err)
 		history = nil
@@ -1166,8 +1167,37 @@ func ChatWithLLM(userID int64, userMessage string) string {
 		{Role: "system", Content: systemPrompt},
 	}
 
-	for _, msg := range history {
-		messages = append(messages, llmMsg{Role: msg.Role, Content: msg.Content})
+	if len(history) > chatHistoryLimit {
+		oldMessages := history[:len(history)-chatHistoryLimit]
+		recentMessages := history[len(history)-chatHistoryLimit:]
+
+		var summary string
+		fromID := oldMessages[0].ID
+		toID := oldMessages[len(oldMessages)-1].ID
+
+		cached := GetCachedSummary(userID, fromID, toID)
+		if cached != "" {
+			summary = cached
+			slog.Info("using cached summary", "user_id", userID, "from", fromID, "to", toID)
+		} else {
+			summary = generateSummary(oldMessages)
+			if summary != "" {
+				if err := SaveCachedSummary(userID, fromID, toID, summary); err != nil {
+					slog.Error("save cached summary failed", "user_id", userID, "error", err)
+				}
+			}
+		}
+
+		if summary != "" {
+			messages = append(messages, llmMsg{Role: "system", Content: "Ringkasan percakapan sebelumnya: " + summary})
+		}
+		for _, msg := range recentMessages {
+			messages = append(messages, llmMsg{Role: msg.Role, Content: msg.Content})
+		}
+	} else {
+		for _, msg := range history {
+			messages = append(messages, llmMsg{Role: msg.Role, Content: msg.Content})
+		}
 	}
 
 	messages = append(messages, llmMsg{Role: "user", Content: userMessage})
@@ -1522,6 +1552,33 @@ func ParseWorkoutToolResult(data string) (workoutID int64, dayName, dateStr, typ
 	}
 
 	return
+}
+
+func generateSummary(messages []ChatMessage) string {
+	var sb strings.Builder
+	for _, msg := range messages {
+		sb.WriteString(msg.Role)
+		sb.WriteString(": ")
+		sb.WriteString(msg.Content)
+		sb.WriteString("\n")
+	}
+
+	prompt := fmt.Sprintf(`Summarize this conversation in Indonesian. Include:
+- Key facts about the user (goals, preferences, equipment, weight, etc.)
+- Any decisions or commitments made
+- Recent topics discussed
+Keep it under 200 words. Focus on information useful for future responses.
+
+Conversation:
+%s`, truncateString(sb.String(), 4000))
+
+	result, err := callLLMGenerate(prompt)
+	if err != nil {
+		slog.Error("generate summary failed", "error", err)
+		return ""
+	}
+
+	return strings.TrimSpace(result)
 }
 
 func truncateString(s string, maxLen int) string {

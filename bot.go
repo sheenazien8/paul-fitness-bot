@@ -76,6 +76,7 @@ func (app *BotApp) HandleUpdate(update tgbotapi.Update) {
 
 	if msg.IsCommand() && msg.Command() == "reset" {
 		ClearOldChatHistory(userID, 0)
+		InvalidateSummaries(userID)
 		app.SendMessage(chatID, "🔄 Chat history udah direset! Mulai dari awal ya.")
 		return
 	}

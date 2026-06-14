@@ -94,7 +94,7 @@ type MoodLog struct {
 type ChatMessage struct {
 	ID        int64
 	UserID    int64
-	Role      string `json:"role"` // "system", "user", "assistant", "tool"
+	Role      string `json:"role"`
 	Content   string
 	CreatedAt time.Time
 }
