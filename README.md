@@ -35,12 +35,6 @@ Formula: `(durasi × 0.3) + (kalori × 0.3) + (kepuasan × 0.4)`
 
 Kepuasan punya bobot terbesar — karena konsisten & menikmati latihan lebih penting dari sekadar angka.
 
-## Alat yang Didukung
-
-- Dumbbell
-- Resistance band
-- Pull-up bar
-
 ## Teknologi
 
 - **Go** — Bahasa utama
