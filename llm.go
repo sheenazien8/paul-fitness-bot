@@ -246,6 +246,10 @@ func getToolDefinitions() []llmTool {
 							Type:        "boolean",
 							Description: "Has pull-up bar equipment",
 						},
+						"notes": {
+							Type:        "string",
+							Description: "Personal notes about injuries, conditions, preferences, or anything relevant to training (e.g. 'cedera lutut kiri', 'pusing kalau olahraga pagi')",
+						},
 					},
 				},
 			},
@@ -367,6 +371,8 @@ Penting:
 - Jangan halusinasi exercise — hanya gunakan data dari tool generate_workout
 - PENTING: JANGAN mengasumsikan user latihan di hari tertentu kalau data tidak menunjukkan itu. Cek data stats/history sebelum komentar soal latihan kemarin atau streak.
 - Streak artinya: jumlah hari latihan terjadwal berturut-turut TANPA bolos. Streak 1 = baru latihan 1 hari jadwal berturut. Jangan bilang "kemarin kamu latihan" kalau data tidak mendukung.
+- Kalau user bilang soal cedera, kondisi medis, atau catatan personal yang relevan untuk latihan → call update_profile dengan field notes
+- Kalau user tanya catatan profil mereka atau mau update → call update_profile dengan field notes
 - Motivasi tapi gak cringe
 - Jawab singkat, padat, gak bertele-tele
 - Kalau user baru dan belum onboarding, bantu mereka setup profil. Tanya SATU PER SATU dengan urutan: (1) goal, (2) experience level, (3) alat yang dimiliki, (4) berat badan, (5) tinggi badan, (6) target berat, (7) hari latihan, (8) jam notifikasi. Setelah semua terisi, call complete_onboarding. JANGAN tanya semua sekaligus.
@@ -400,6 +406,10 @@ Penting:
 			}
 		} else {
 			basePrompt += "Latihan terakhir: belum pernah\n"
+		}
+
+		if user.ProfileNotes != "" {
+			basePrompt += fmt.Sprintf("Catatan profil: %s\n", user.ProfileNotes)
 		}
 	}
 
@@ -773,10 +783,10 @@ func toolGetUserProfile(userID int64) ToolResult {
 	return ToolResult{
 		ToolName: "get_user_profile",
 		Success:  true,
-		Data: fmt.Sprintf("Nama: %s | Berat: %.1f kg | Tinggi: %.0f cm | BMI: %.1f (%s %s) | Target: %.1f kg | Tujuan: %s | Level: %s | Alat: %s | Hari latihan: %s | Notifikasi: %02d:00 | Onboarding: %v",
+		Data: fmt.Sprintf("Nama: %s | Berat: %.1f kg | Tinggi: %.0f cm | BMI: %.1f (%s %s) | Target: %.1f kg | Tujuan: %s | Level: %s | Alat: %s | Hari latihan: %s | Notifikasi: %02d:00 | Onboarding: %v | Catatan: %s",
 			user.FirstName, user.Weight, user.Height, bmi, GetBMIStatus(bmi), GetBMIEmoji(bmi),
 			user.TargetWeight, goalLabel, levelLabel, strings.Join(equipItems, ", "),
-			user.WorkoutDays, user.NotificationHour, prefs.OnboardingDone),
+			user.WorkoutDays, user.NotificationHour, prefs.OnboardingDone, user.ProfileNotes),
 	}
 }
 
@@ -824,6 +834,9 @@ func toolUpdateProfile(userID int64, args map[string]interface{}) ToolResult {
 	}
 	if v, ok := args["has_pullup_bar"].(bool); ok {
 		UpdateUserPreferenceField(userID, "has_pullup_bar", boolToInt(v))
+	}
+	if notes, ok := args["notes"].(string); ok {
+		UpdateProfileNotes(userID, notes)
 	}
 
 	return ToolResult{

@@ -25,6 +25,16 @@ func NewBotApp(token string) (*BotApp, error) {
 	bot.Debug = false
 	slog.Info("bot authorized", "username", bot.Self.UserName)
 
+	// Register bot commands
+	cmds := []tgbotapi.BotCommand{
+		{Command: "start", Description: "Mulai / setup profil"},
+		{Command: "reset", Description: "Reset chat history"},
+		{Command: "notes", Description: "Lihat/tambah catatan profil (cedera, kondisi, dll)"},
+	}
+	if _, err := bot.Request(tgbotapi.NewSetMyCommands(cmds...)); err != nil {
+		slog.Warn("failed to register commands", "error", err)
+	}
+
 	return &BotApp{Bot: bot}, nil
 }
 
@@ -78,6 +88,11 @@ func (app *BotApp) HandleUpdate(update tgbotapi.Update) {
 		ClearOldChatHistory(userID, 0)
 		InvalidateSummaries(userID)
 		app.SendMessage(chatID, "🔄 Chat history udah direset! Mulai dari awal ya.")
+		return
+	}
+
+	if msg.IsCommand() && msg.Command() == "notes" {
+		app.cmdNotes(userID, chatID, msg.Text)
 		return
 	}
 
@@ -145,6 +160,34 @@ func (app *BotApp) cmdStart(userID, chatID int64) {
 	app.SendTyping(chatID)
 	response := ChatWithLLM(userID, "/start")
 	app.SendMessage(chatID, response)
+}
+
+func (app *BotApp) cmdNotes(userID, chatID int64, text string) {
+	user, err := GetUser(userID)
+	if err != nil || user == nil {
+		app.SendMessage(chatID, "⚠️ Profil belum ditemukan. Ketik /start dulu ya.")
+		return
+	}
+
+	args := strings.TrimPrefix(text, "/notes")
+	args = strings.TrimSpace(args)
+
+	if args == "" {
+		// Show current notes
+		if user.ProfileNotes == "" {
+			app.SendMessage(chatID, "📋 Kamu belum punya catatan profil.\n\nKetik <code>/notes [catatan]</code> untuk menambahkan, contoh:\n<code>/notes cedera lutut kiri, pusing kalau olahraga pagi</code>")
+		} else {
+			app.SendMessage(chatID, fmt.Sprintf("📋 Catatan profil kamu:\n\n%s\n\nKetik <code>/notes [catatan baru]</code> untuk mengupdate.", user.ProfileNotes))
+		}
+		return
+	}
+
+	// Update notes
+	if err := UpdateProfileNotes(userID, args); err != nil {
+		app.SendMessage(chatID, "❌ Gagal menyimpan catatan profil.")
+		return
+	}
+	app.SendMessage(chatID, fmt.Sprintf("✅ Catatan profil diupdate:\n\n%s", args))
 }
 
 func (app *BotApp) handleCallback(callback *tgbotapi.CallbackQuery) {

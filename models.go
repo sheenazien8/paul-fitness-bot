@@ -15,6 +15,7 @@ type User struct {
 	NotificationHour int
 	Streak           int
 	LastWorkoutDate  string
+	ProfileNotes     string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }

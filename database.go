@@ -138,6 +138,10 @@ func migrate() error {
 		slog.Debug("weekly_report column may already exist", "error", err)
 	}
 
+	if _, err := db.Exec(`ALTER TABLE users ADD COLUMN profile_notes TEXT DEFAULT ''`); err != nil {
+		slog.Debug("profile_notes column may already exist", "error", err)
+	}
+
 	return nil
 }
 
@@ -166,15 +170,19 @@ func CreateUser(user *User) error {
 func GetUser(userID int64) (*User, error) {
 	u := &User{}
 	var lastWorkoutDate sql.NullString
+	var profileNotes sql.NullString
 	err := db.QueryRow(
-		`SELECT user_id, username, first_name, weight, height, target_weight, workout_days, notification_hour, streak, last_workout_date, created_at, updated_at
+		`SELECT user_id, username, first_name, weight, height, target_weight, workout_days, notification_hour, streak, last_workout_date, profile_notes, created_at, updated_at
 		 FROM users WHERE user_id = ?`, userID,
-	).Scan(&u.UserID, &u.Username, &u.FirstName, &u.Weight, &u.Height, &u.TargetWeight, &u.WorkoutDays, &u.NotificationHour, &u.Streak, &lastWorkoutDate, &u.CreatedAt, &u.UpdatedAt)
+	).Scan(&u.UserID, &u.Username, &u.FirstName, &u.Weight, &u.Height, &u.TargetWeight, &u.WorkoutDays, &u.NotificationHour, &u.Streak, &lastWorkoutDate, &profileNotes, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("get user: %w", err)
 	}
 	if lastWorkoutDate.Valid {
 		u.LastWorkoutDate = lastWorkoutDate.String
+	}
+	if profileNotes.Valid {
+		u.ProfileNotes = profileNotes.String
 	}
 	return u, nil
 }
@@ -196,6 +204,11 @@ func UpdateUserSettings(userID int64, workoutDays string, notificationHour int) 
 
 func UpdateUserProfile(userID int64, weight, height, targetWeight float64) error {
 	_, err := db.Exec(`UPDATE users SET weight = ?, height = ?, target_weight = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?`, weight, height, targetWeight, userID)
+	return err
+}
+
+func UpdateProfileNotes(userID int64, notes string) error {
+	_, err := db.Exec(`UPDATE users SET profile_notes = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?`, notes, userID)
 	return err
 }
 
@@ -585,7 +598,7 @@ func InvalidateSummaries(userID int64) error {
 func GetAllActiveUsers() ([]User, error) {
 	rows, err := db.Query(
 		`SELECT u.user_id, u.username, u.first_name, u.weight, u.height, u.target_weight,
-		        u.workout_days, u.notification_hour, u.streak, u.last_workout_date,
+		        u.workout_days, u.notification_hour, u.streak, u.last_workout_date, u.profile_notes,
 		        u.created_at, u.updated_at
 		 FROM users u
 		 JOIN user_preferences p ON u.user_id = p.user_id
@@ -599,9 +612,13 @@ func GetAllActiveUsers() ([]User, error) {
 	var users []User
 	for rows.Next() {
 		var u User
+		var profileNotes sql.NullString
 		if err := rows.Scan(&u.UserID, &u.Username, &u.FirstName, &u.Weight, &u.Height, &u.TargetWeight,
-			&u.WorkoutDays, &u.NotificationHour, &u.Streak, &u.LastWorkoutDate, &u.CreatedAt, &u.UpdatedAt); err != nil {
+			&u.WorkoutDays, &u.NotificationHour, &u.Streak, &u.LastWorkoutDate, &profileNotes, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
+		}
+		if profileNotes.Valid {
+			u.ProfileNotes = profileNotes.String
 		}
 		users = append(users, u)
 	}
