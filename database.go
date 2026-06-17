@@ -271,6 +271,17 @@ func GetWeeklyWorkoutLogs(userID int64) ([]WorkoutLog, error) {
 	return logs, nil
 }
 
+func GetLastWorkoutLogDate(userID int64) (string, error) {
+	var dateStr string
+	err := db.QueryRow(
+		`SELECT DATE(logged_at) FROM workout_logs WHERE user_id = ? ORDER BY logged_at DESC LIMIT 1`, userID,
+	).Scan(&dateStr)
+	if err != nil {
+		return "", err
+	}
+	return dateStr, nil
+}
+
 func GetRecentWorkoutLogs(userID int64, limit int) ([]WorkoutLog, error) {
 	rows, err := db.Query(
 		`SELECT id, user_id, workout_id, duration_minutes, calories, satisfaction, score, logged_at

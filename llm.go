@@ -365,6 +365,8 @@ Penting:
 - Exercise name dalam bahasa Inggris (standar gym)
 - Cara/how_to dalam bahasa Indonesia
 - Jangan halusinasi exercise — hanya gunakan data dari tool generate_workout
+- PENTING: JANGAN mengasumsikan user latihan di hari tertentu kalau data tidak menunjukkan itu. Cek data stats/history sebelum komentar soal latihan kemarin atau streak.
+- Streak artinya: jumlah hari latihan terjadwal berturut-turut TANPA bolos. Streak 1 = baru latihan 1 hari jadwal berturut. Jangan bilang "kemarin kamu latihan" kalau data tidak mendukung.
 - Motivasi tapi gak cringe
 - Jawab singkat, padat, gak bertele-tele
 - Kalau user baru dan belum onboarding, bantu mereka setup profil. Tanya SATU PER SATU dengan urutan: (1) goal, (2) experience level, (3) alat yang dimiliki, (4) berat badan, (5) tinggi badan, (6) target berat, (7) hari latihan, (8) jam notifikasi. Setelah semua terisi, call complete_onboarding. JANGAN tanya semua sekaligus.
@@ -383,6 +385,22 @@ Penting:
 		basePrompt += fmt.Sprintf("Hari latihan: %s\n", user.WorkoutDays)
 		basePrompt += fmt.Sprintf("Jam notifikasi: %02d:00 WIB\n", user.NotificationHour)
 		basePrompt += fmt.Sprintf("Streak: %d hari\n", user.Streak)
+
+		if user.LastWorkoutDate != "" {
+			lastDate, parseErr := time.Parse("2006-01-02", user.LastWorkoutDate)
+			if parseErr == nil {
+				daysAgo := int(time.Now().Sub(lastDate).Hours() / 24)
+				if daysAgo == 0 {
+					basePrompt += "Latihan terakhir: hari ini\n"
+				} else if daysAgo == 1 {
+					basePrompt += "Latihan terakhir: kemarin\n"
+				} else {
+					basePrompt += fmt.Sprintf("Latihan terakhir: %d hari yang lalu\n", daysAgo)
+				}
+			}
+		} else {
+			basePrompt += "Latihan terakhir: belum pernah\n"
+		}
 	}
 
 	prefs, err := GetUserPreferences(userID)
@@ -623,17 +641,19 @@ func toolLogWorkoutDone(userID int64, args map[string]interface{}) ToolResult {
 	}
 
 	today := now.Format("2006-01-02")
-	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
 	user, _ := GetUser(userID)
 
 	var newStreak int
 	if user != nil {
-		if user.LastWorkoutDate == yesterday {
-			newStreak = user.Streak + 1
-		} else if user.LastWorkoutDate == today {
+		if user.LastWorkoutDate == today {
 			newStreak = user.Streak
 		} else {
-			newStreak = 1
+			prevScheduledDay := getPrevScheduledDay(user.WorkoutDays)
+			if user.LastWorkoutDate == prevScheduledDay {
+				newStreak = user.Streak + 1
+			} else {
+				newStreak = 1
+			}
 		}
 		UpdateUserStreak(userID, newStreak, today)
 	}

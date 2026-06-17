@@ -321,3 +321,34 @@ func GetWorkoutForDay(dayOfWeek int) []Exercise {
 func GetWorkoutType(dayOfWeek int) string {
 	return DayWorkoutMap[dayOfWeek]
 }
+
+// getPrevScheduledDay returns the date string of the previous scheduled workout day
+// based on the user's workout_days config. For example, if today is Thursday
+// and workout days are Mon,Tue,Wed,Fri (1,2,3,5), the previous scheduled day
+// is Wednesday (3).
+func getPrevScheduledDay(workoutDaysStr string) string {
+	days := parseWorkoutDays(workoutDaysStr)
+	if len(days) == 0 {
+		return time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+	}
+
+	now := time.Now()
+	currentDow := int(now.Weekday())
+	if currentDow == 0 {
+		currentDow = 7
+	}
+
+	for i := 1; i <= 7; i++ {
+		prevDow := currentDow - i
+		if prevDow <= 0 {
+			prevDow += 7
+		}
+		for _, d := range days {
+			if d == prevDow {
+				return now.AddDate(0, 0, -i).Format("2006-01-02")
+			}
+		}
+	}
+
+	return now.AddDate(0, 0, -1).Format("2006-01-02")
+}

@@ -323,17 +323,19 @@ func (app *BotApp) handleWorkoutLogInput(userID, chatID int64, text string, sess
 		}
 
 		today := time.Now().Format("2006-01-02")
-		yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
 		user, _ := GetUser(userID)
 
 		var newStreak int
 		if user != nil {
-			if user.LastWorkoutDate == yesterday {
-				newStreak = user.Streak + 1
-			} else if user.LastWorkoutDate == today {
+			if user.LastWorkoutDate == today {
 				newStreak = user.Streak
 			} else {
-				newStreak = 1
+				prevScheduledDay := getPrevScheduledDay(user.WorkoutDays)
+					if user.LastWorkoutDate == prevScheduledDay {
+						newStreak = user.Streak + 1
+					} else {
+						newStreak = 1
+					}
 			}
 			UpdateUserStreak(userID, newStreak, today)
 		}
@@ -374,12 +376,30 @@ func (app *BotApp) SendWorkoutNotification(userID int64) {
 		streak = user.Streak
 	}
 
+	var lastWorkoutInfo string
+	lastLogDate, err := GetLastWorkoutLogDate(userID)
+	if err == nil && lastLogDate != "" {
+		lastLogTime, parseErr := time.Parse("2006-01-02", lastLogDate)
+		if parseErr == nil {
+			daysAgo := int(time.Now().Sub(lastLogTime).Hours() / 24)
+			if daysAgo == 0 {
+				lastWorkoutInfo = "User sudah latihan hari ini."
+			} else if daysAgo == 1 {
+				lastWorkoutInfo = "User terakhir latihan kemarin."
+			} else {
+				lastWorkoutInfo = fmt.Sprintf("User terakhir latihan %d hari yang lalu.", daysAgo)
+			}
+		}
+	} else {
+		lastWorkoutInfo = "User belum pernah latihan."
+	}
+
 	var prompt string
 	if workoutType == "" {
-		prompt = fmt.Sprintf("Hari ini %s, bukan hari latihan. Kasih semangat buat istirahat dan recovery. Streak user: %d hari.", dayName, streak)
+		prompt = fmt.Sprintf("Hari ini %s, bukan hari latihan. Kasih semangat buat istirahat dan recovery. Streak user: %d hari. %s JANGAN mengasumsikan user latihan kemarin kalau data menunjukkan sebaliknya.", dayName, streak, lastWorkoutInfo)
 	} else {
 		typeName := WorkoutTypeNames[workoutType]
-		prompt = fmt.Sprintf("Pagi! Hari ini %s, waktunya latihan %s. Generate workout untuk hari ini. Streak user: %d hari.", dayName, typeName, streak)
+		prompt = fmt.Sprintf("Pagi! Hari ini %s, waktunya latihan %s. Generate workout untuk hari ini. Streak user: %d hari. %s", dayName, typeName, streak, lastWorkoutInfo)
 	}
 
 	app.SendTyping(userID)
