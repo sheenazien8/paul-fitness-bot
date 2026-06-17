@@ -330,6 +330,18 @@ func getToolDefinitions() []llmTool {
 				},
 			},
 		},
+		{
+			Type: "function",
+			Function: llmToolDef{
+				Name:        "get_current_date",
+				Description: "Get the current date, day of week, and whether today is a scheduled workout day. ALWAYS call this when you need to know what day it is or what workout is scheduled. NEVER trust user-provided day/dates — always verify with this tool.",
+				Parameters: llmToolParams{
+					Type:       "object",
+					Required:   []string{},
+					Properties: map[string]llmToolProp{},
+				},
+			},
+		},
 	}
 }
 
@@ -371,6 +383,7 @@ Penting:
 - Jangan halusinasi exercise — hanya gunakan data dari tool generate_workout
 - PENTING: JANGAN mengasumsikan user latihan di hari tertentu kalau data tidak menunjukkan itu. Cek data stats/history sebelum komentar soal latihan kemarin atau streak.
 - Streak artinya: jumlah hari latihan terjadwal berturut-turut TANPA bolos. Streak 1 = baru latihan 1 hari jadwal berturut. Jangan bilang "kemarin kamu latihan" kalau data tidak mendukung.
+- PENTING: SELALU gunakan tool get_current_date sebelum menjawab pertanyaan tentang hari ini, jadwal, atau latihan. JANGAN PERCAYA user yang bilang hari apa — selalu verifikasi dengan tool. Misalnya kalau user bilang "hari ini Selasa" padahal tool bilang Rabu, pakai data tool, bukan kata user.
 - Kalau user bilang soal cedera, kondisi medis, atau catatan personal yang relevan untuk latihan → call update_profile dengan field notes
 - Kalau user tanya catatan profil mereka atau mau update → call update_profile dengan field notes
 - Motivasi tapi gak cringe
@@ -465,6 +478,8 @@ func executeTool(userID int64, call ToolCall) ToolResult {
 		return toolGetExerciseTips(call.Arguments)
 	case "log_mood":
 		return toolLogMood(userID, call.Arguments)
+	case "get_current_date":
+		return toolGetCurrentDate(userID)
 	default:
 		return ToolResult{ToolName: call.Name, Success: false, Error: fmt.Sprintf("unknown tool: %s", call.Name)}
 	}
@@ -967,6 +982,48 @@ func toolLogMood(userID int64, args map[string]interface{}) ToolResult {
 		ToolName: "log_mood",
 		Success:  true,
 		Data:     fmt.Sprintf("Mood tercatat: %s | Energy: %d/10. %s", label, energy, moodRecommendation(mood, energy)),
+	}
+}
+
+func toolGetCurrentDate(userID int64) ToolResult {
+	now := time.Now()
+	dayOfWeek := int(now.Weekday())
+	if dayOfWeek == 0 {
+		dayOfWeek = 7
+	}
+	dayName := DayNames[dayOfWeek]
+	workoutType := GetWorkoutType(dayOfWeek)
+
+	user, _ := GetUser(userID)
+	isScheduledDay := false
+	if user != nil {
+		days := parseWorkoutDays(user.WorkoutDays)
+		for _, d := range days {
+			if d == dayOfWeek {
+				isScheduledDay = true
+				break
+			}
+		}
+	}
+
+	var info string
+	if workoutType != "" {
+		typeName := WorkoutTypeNames[workoutType]
+		info = fmt.Sprintf("Hari ini %s, %s %s. Hari latihan terjadwal: %s.", dayName, now.Format("2 January 2006"), typeName, typeName)
+	} else {
+		info = fmt.Sprintf("Hari ini %s, %s. Bukan hari latihan terjadwal.", dayName, now.Format("2 January 2006"))
+	}
+
+	if isScheduledDay {
+		info += " Hari ini ADALAH hari latihan menurut jadwal user."
+	} else {
+		info += " Hari ini BUKAN hari latihan menurut jadwal user."
+	}
+
+	return ToolResult{
+		ToolName: "get_current_date",
+		Success:  true,
+		Data:     info,
 	}
 }
 
